@@ -1,7 +1,12 @@
 package eu.kanade.tachiyomi.extension.ru.nudemoon
 
+import android.content.SharedPreferences
 import android.webkit.CookieManager
+import android.widget.Toast
+import androidx.preference.EditTextPreference
+import androidx.preference.PreferenceScreen
 import eu.kanade.tachiyomi.network.GET
+import eu.kanade.tachiyomi.source.ConfigurableSource
 import eu.kanade.tachiyomi.source.model.Filter
 import eu.kanade.tachiyomi.source.model.FilterList
 import eu.kanade.tachiyomi.source.model.Page
@@ -9,6 +14,8 @@ import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
 import eu.kanade.tachiyomi.source.online.ParsedHttpSource
 import eu.kanade.tachiyomi.util.asJsoup
+import keiyoushi.utils.getPreferences
+import okhttp3.Headers
 import okhttp3.Request
 import okhttp3.Response
 import org.jsoup.nodes.Document
@@ -16,21 +23,29 @@ import org.jsoup.nodes.Element
 import java.net.URLEncoder
 import java.text.SimpleDateFormat
 import java.util.Locale
+import kotlin.math.absoluteValue
+import kotlin.random.Random
 
-class Nudemoon : ParsedHttpSource() {
+class Nudemoon : ParsedHttpSource(), ConfigurableSource {
 
     override val name = "Nude-Moon"
-
-    override val baseUrl = "https://x.nude-moon.fun"
 
     override val lang = "ru"
 
     override val supportsLatest = true
 
+    private val preferences: SharedPreferences = getPreferences()
+
+    override val baseUrl by lazy { getPrefBaseUrl() }
+
     private val dateParseRu = SimpleDateFormat("d MMMM yyyy", Locale("ru"))
-    private val dateParseSlash = SimpleDateFormat("d/MM/yyyy", Locale("ru"))
 
     private val cookieManager by lazy { CookieManager.getInstance() }
+
+    private val userAgentRandomizer = "${Random.nextInt().absoluteValue}"
+    override fun headersBuilder(): Headers.Builder = Headers.Builder()
+        .add("User-Agent", "Mozilla/5.0 (Linux; Android 10; SM-G980F) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/100.0.$userAgentRandomizer Mobile Safari/537.36")
+        .add("Referer", baseUrl)
 
     init {
         cookieManager.setCookie(baseUrl, "nm_mobile=1; Domain=" + baseUrl.split("//")[1])
@@ -48,7 +63,7 @@ class Nudemoon : ParsedHttpSource() {
             "${URLEncoder.encode(it.key, "UTF-8")}=${URLEncoder.encode(it.value, "UTF-8")}"
         }
 
-    override val client = network.client.newBuilder()
+    override val client = network.cloudflareClient.newBuilder()
         .addNetworkInterceptor { chain ->
             val newReq = chain
                 .request()
@@ -117,8 +132,8 @@ class Nudemoon : ParsedHttpSource() {
     override fun popularMangaFromElement(element: Element): SManga {
         val manga = SManga.create()
 
-        manga.thumbnail_url = element.select("img.news_pic2").attr("abs:src")
-        element.select("a:has(h2)").let {
+        manga.thumbnail_url = element.selectFirst("a img")?.attr("abs:src")
+        element.selectFirst("a:has(h2)")!!.let {
             manga.title = it.text().substringBefore(" / ").substringBefore(" №")
             manga.setUrlWithoutDomain(it.attr("href"))
         }
@@ -140,12 +155,12 @@ class Nudemoon : ParsedHttpSource() {
 
     override fun mangaDetailsParse(document: Document): SManga {
         val manga = SManga.create()
-        val infoElement = document.select("table.news_pic2").first()!!
-        manga.title = document.select("h1").first()!!.text().substringBefore(" / ").substringBefore(" №")
-        manga.author = infoElement.select("a[href*=mangaka]").text()
-        manga.genre = infoElement.select("div.tag-links a").joinToString { it.text() }
-        manga.description = document.select(".description").text()
-        manga.thumbnail_url = document.selectFirst("meta[property=og:image]")!!.attr("abs:content")
+        val infoElement = document.selectFirst("table.news_pic2")
+        manga.title = document.selectFirst("h1")!!.text().substringBefore(" / ").substringBefore(" №")
+        manga.author = infoElement?.selectFirst("a[href*=mangaka]")?.text()
+        manga.genre = infoElement?.select("div.tag-links a")?.joinToString { it.text() }
+        manga.description = document.selectFirst(".description")?.text()
+        manga.thumbnail_url = document.selectFirst("meta[property=og:image]")?.attr("abs:content")
 
         return manga
     }
@@ -159,27 +174,7 @@ class Nudemoon : ParsedHttpSource() {
     override fun chapterListParse(response: Response): List<SChapter> = mutableListOf<SChapter>().apply {
         val document = response.asJsoup()
 
-        val allPageElement = document.select("td.button a:contains(Все главы)")
-
-        if (allPageElement.isEmpty()) {
-            add(
-                SChapter.create().apply {
-                    val chapterName = document.select("table td.bg_style1 h1").text()
-                    val chapterUrl = response.request.url.toString()
-                    setUrlWithoutDomain(chapterUrl)
-                    name = "$chapterName Сингл"
-                    scanlator = document.select("table.news_pic2 a[href*=perevod]").text()
-                    date_upload = document.select("table.news_pic2 span.small2:contains(/)").text().let {
-                        try {
-                            dateParseSlash.parse(it)?.time ?: 0L
-                        } catch (e: Exception) {
-                            0
-                        }
-                    }
-                    chapter_number = 0F
-                },
-            )
-        } else {
+        document.selectFirst("td.button a:contains(Все главы)")?.let { allPageElement ->
             var pageListDocument: Document
             val pageListLink = allPageElement.attr("href")
             client.newCall(
@@ -191,35 +186,60 @@ class Nudemoon : ParsedHttpSource() {
                 }
                 pageListDocument = this.asJsoup()
             }
-            pageListDocument.select(chapterListSelector())
-                .forEach {
-                    add(chapterFromElement(it))
-                }
+            if (pageListDocument.select(chapterListSelector()).isEmpty()) {
+                add(chapterFromSinglePage(document, response.request.url.toString()))
+            } else {
+                pageListDocument.select(chapterListSelector())
+                    .forEach {
+                        add(chapterFromElement(it))
+                    }
+            }
+        } ?: run {
+            add(chapterFromSinglePage(document, response.request.url.toString()))
         }
     }
 
+    private fun chapterFromSinglePage(document: Document, responseUrl: String): SChapter = SChapter.create().apply {
+        val chapterName = document.selectFirst("table td.bg_style1 h1")?.text()
+        name = "$chapterName Сингл"
+        setUrlWithoutDomain(responseUrl)
+        if (url.contains(baseUrl)) {
+            url = url.replace(baseUrl, "")
+        }
+        scanlator = document.selectFirst("table.news_pic2 a[href*=perevod]")?.text()
+        date_upload = document.selectFirst("""table.news_pic2 span.small2:matches((0[1-9]|[12][0-9]|3[01])*(19|20)\d{2})""")?.text()?.let {
+            dateParseWithReplace(it)
+        } ?: 0L
+        chapter_number = 0F
+    }
+
     override fun chapterFromElement(element: Element): SChapter = SChapter.create().apply {
-        val nameAndUrl = element.select("tr[valign=top] a:has(h2)")
-        name = nameAndUrl.select("h2").text()
+        val nameAndUrl = element.selectFirst("tr[valign=top] a:has(h2)")
+        name = nameAndUrl!!.selectFirst("h2")!!.text()
         setUrlWithoutDomain(nameAndUrl.attr("abs:href"))
         if (url.contains(baseUrl)) {
             url = url.replace(baseUrl, "")
         }
-        val informBlock = element.select("tr[valign=top] td[align=left]")
-        scanlator = informBlock.select("a[href*=perevod]").text()
-        date_upload = informBlock.select("span.small2")
-            .text().replace("Май", "Мая").let { textDate ->
-                try {
-                    dateParseRu.parse(textDate)?.time ?: 0L
-                } catch (e: Exception) {
-                    0
-                }
-            }
+        val informBlock = element.selectFirst("tr[valign=top] td[align=left]")
+        scanlator = informBlock?.selectFirst("a[href*=perevod]")?.text()
+        date_upload = informBlock?.selectFirst("""span.small2:matches((0[1-9]|[12][0-9]|3[01])*(19|20)\d{2})""")?.text()?.let {
+            dateParseWithReplace(it)
+        } ?: 0L
         chapter_number = name.substringAfter("№").substringBefore(" ").toFloatOrNull() ?: -1f
     }
 
+    private fun dateParseWithReplace(textDate: String): Long {
+        return textDate.replace("Май", "Мая").let {
+            try {
+                dateParseRu.parse(it)?.time ?: 0L
+            } catch (e: Exception) {
+                0L
+            }
+        }
+    }
+
     override fun pageListParse(response: Response): List<Page> = mutableListOf<Page>().apply {
-        response.asJsoup().select("div.gallery-item img.textbox").mapIndexed { index, img ->
+        response.asJsoup().select("div.gallery-item img").mapIndexed { index, img ->
             add(Page(index, imageUrl = img.attr("abs:data-src")))
         }
         if (size == 0 && cookieManager.getCookie(baseUrl).contains("fusion_user").not()) {
@@ -227,9 +247,9 @@ class Nudemoon : ParsedHttpSource() {
         }
     }
 
-    override fun imageUrlParse(document: Document) = throw Exception("Not Used")
+    override fun imageUrlParse(document: Document) = throw UnsupportedOperationException()
 
-    override fun pageListParse(document: Document): List<Page> = throw Exception("Not Used")
+    override fun pageListParse(document: Document): List<Page> = throw UnsupportedOperationException()
 
     private class Genre(name: String, val id: String = name.replace(' ', '_')) : Filter.CheckBox(name.replaceFirstChar { it.uppercaseChar() })
     private class GenreList(genres: List<Genre>) : Filter.Group<Genre>("Тэги", genres)
@@ -328,4 +348,38 @@ class Nudemoon : ParsedHttpSource() {
         Genre("titsfuck"),
         Genre("x-ray"),
     )
+
+    override fun setupPreferenceScreen(screen: PreferenceScreen) {
+        EditTextPreference(screen.context).apply {
+            key = DOMAIN_PREF
+            title = DOMAIN_TITLE
+            setDefaultValue(DOMAIN_DEFAULT)
+            dialogTitle = DOMAIN_TITLE
+            dialogMessage = "Default URL:\n\t$DOMAIN_DEFAULT"
+            setOnPreferenceChangeListener { _, _ ->
+                Toast.makeText(screen.context, "Для смены домена необходимо перезапустить приложение с полной остановкой.", Toast.LENGTH_LONG).show()
+                true
+            }
+        }.let(screen::addPreference)
+    }
+
+    private fun getPrefBaseUrl(): String = preferences.getString(DOMAIN_PREF, DOMAIN_DEFAULT)!!
+
+    init {
+        preferences.getString(DEFAULT_DOMAIN_PREF, null).let { defaultBaseUrl ->
+            if (defaultBaseUrl != DOMAIN_DEFAULT) {
+                preferences.edit()
+                    .putString(DOMAIN_PREF, DOMAIN_DEFAULT)
+                    .putString(DEFAULT_DOMAIN_PREF, DOMAIN_DEFAULT)
+                    .apply()
+            }
+        }
+    }
+
+    companion object {
+        private const val DOMAIN_PREF = "Домен"
+        private const val DEFAULT_DOMAIN_PREF = "pref_default_domain"
+        private const val DOMAIN_TITLE = "Домен"
+        private const val DOMAIN_DEFAULT = "https://nude-moon.org"
+    }
 }

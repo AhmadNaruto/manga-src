@@ -1,11 +1,7 @@
-apply plugin: 'com.android.application'
-apply plugin: 'kotlin-android'
-
 ext {
     extName = 'BacaKomik'
-    pkgNameSuffix = 'id.bacakomik'
     extClass = '.BacaKomik'
-    extVersionCode = 10
+    extVersionCode = 11
 }
 
 apply from: "$rootDir/common.gradle"

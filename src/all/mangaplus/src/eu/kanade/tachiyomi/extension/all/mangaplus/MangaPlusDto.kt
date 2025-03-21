@@ -7,54 +7,68 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 @Serializable
-data class MangaPlusResponse(
+class MangaPlusResponse(
     val success: SuccessResult? = null,
     val error: ErrorResult? = null,
 )
 
 @Serializable
-data class ErrorResult(val popups: List<Popup> = emptyList()) {
+class ErrorResult(val popups: List<Popup> = emptyList()) {
 
     fun langPopup(lang: Language): Popup? =
         popups.firstOrNull { it.language == lang }
 }
 
 @Serializable
-data class Popup(
+class Popup(
     val subject: String,
     val body: String,
     val language: Language? = Language.ENGLISH,
 )
 
 @Serializable
-data class SuccessResult(
+class SuccessResult(
     val isFeaturedUpdated: Boolean? = false,
-    val titleRankingView: TitleRankingView? = null,
+    val titleRankingViewV2: TitleRankingViewV2? = null,
     val titleDetailView: TitleDetailView? = null,
     val mangaViewer: MangaViewer? = null,
     val allTitlesViewV2: AllTitlesViewV2? = null,
-    val webHomeViewV3: WebHomeViewV3? = null,
+    val webHomeViewV4: WebHomeViewV4? = null,
 )
 
 @Serializable
-data class TitleRankingView(val titles: List<Title> = emptyList())
+class TitleRankingViewV2(val rankedTitles: List<RankedTitle> = emptyList())
 
 @Serializable
-data class AllTitlesViewV2(
+class RankedTitle(
+    val titles: List<Title> = emptyList(),
+)
+
+@Serializable
+class AllTitlesViewV2(
     @SerialName("AllTitlesGroup") val allTitlesGroup: List<AllTitlesGroup> = emptyList(),
 )
 
 @Serializable
-data class AllTitlesGroup(
+class AllTitlesGroup(
     val theTitle: String,
     val titles: List<Title> = emptyList(),
 )
 
 @Serializable
-data class WebHomeViewV3(val groups: List<UpdatedTitleV2Group> = emptyList())
+class WebHomeViewV4(
+    val groups: List<UpdatedTitleV2Group> = emptyList(),
+    val rankedTitles: List<RankedTitle> = emptyList(),
+    val featuredTitleLists: List<FeaturedTitleList> = emptyList(),
+)
 
 @Serializable
-data class TitleDetailView(
+class FeaturedTitleList(
+    val featuredTitles: List<Title> = emptyList(),
+)
+
+@Serializable
+class TitleDetailView(
     val title: Title,
     val titleImageUrl: String,
     val overview: String? = null,
@@ -148,7 +162,7 @@ data class TitleDetailView(
 }
 
 @Serializable
-data class TitleLabels(
+class TitleLabels(
     val releaseSchedule: ReleaseSchedule = ReleaseSchedule.DISABLED,
     val isSimulpub: Boolean = false,
 )
@@ -177,7 +191,7 @@ enum class Rating {
 }
 
 @Serializable
-data class Label(val label: LabelCode? = LabelCode.WEEKLY_SHOUNEN_JUMP) {
+class Label(val label: LabelCode? = LabelCode.WEEKLY_SHOUNEN_JUMP) {
     val magazine: String?
         get() = when (label) {
             LabelCode.WEEKLY_SHOUNEN_JUMP -> "Weekly Shounen Jump"
@@ -189,6 +203,7 @@ data class Label(val label: LabelCode? = LabelCode.WEEKLY_SHOUNEN_JUMP) {
             LabelCode.SHOUNEN_JUMP_PLUS -> "Shounen Jump+"
             LabelCode.MANGA_PLUS_CREATORS -> "MANGA Plus Creators"
             LabelCode.SAIKYOU_JUMP -> "Saikyou Jump"
+            LabelCode.ULTRA_JUMP -> "Ultra Jump"
             else -> null
         }
 }
@@ -225,23 +240,26 @@ enum class LabelCode {
 
     @SerialName("WSJ")
     WEEKLY_SHOUNEN_JUMP,
+
+    @SerialName("UJ")
+    ULTRA_JUMP,
 }
 
 @Serializable
-data class ChapterListGroup(
+class ChapterListGroup(
     val firstChapterList: List<Chapter> = emptyList(),
     val lastChapterList: List<Chapter> = emptyList(),
 )
 
 @Serializable
-data class MangaViewer(
+class MangaViewer(
     val pages: List<MangaPlusPage> = emptyList(),
     val titleId: Int? = null,
     val titleName: String? = null,
 )
 
 @Serializable
-data class Title(
+class Title(
     val titleId: Int,
     val name: String,
     val author: String? = null,
@@ -268,25 +286,26 @@ enum class Language {
     RUSSIAN,
     THAI,
     VIETNAMESE,
+    GERMAN,
 }
 
 @Serializable
-data class UpdatedTitleV2Group(
+class UpdatedTitleV2Group(
     val groupName: String,
     val titleGroups: List<OriginalTitleGroup> = emptyList(),
 )
 
 @Serializable
-data class OriginalTitleGroup(
+class OriginalTitleGroup(
     val theTitle: String,
     val titles: List<UpdatedTitle> = emptyList(),
 )
 
 @Serializable
-data class UpdatedTitle(val title: Title)
+class UpdatedTitle(val title: Title)
 
 @Serializable
-data class Chapter(
+class Chapter(
     val titleId: Int,
     val chapterId: Int,
     val name: String,
@@ -299,19 +318,24 @@ data class Chapter(
     val isExpired: Boolean
         get() = subTitle == null
 
-    fun toSChapter(): SChapter = SChapter.create().apply {
-        name = "${this@Chapter.name} - $subTitle"
+    fun toSChapter(subtitlePref: Boolean): SChapter = SChapter.create().apply {
+        name = if (subtitlePref && subTitle != null) {
+            subTitle
+        } else {
+            "${this@Chapter.name} - $subTitle"
+        }
         date_upload = 1000L * startTimeStamp
         url = "#/viewer/$chapterId"
         chapter_number = this@Chapter.name.substringAfter("#").toFloatOrNull() ?: -1f
+        scanlator = "MANGA Plus"
     }
 }
 
 @Serializable
-data class MangaPlusPage(val mangaPage: MangaPage? = null)
+class MangaPlusPage(val mangaPage: MangaPage? = null)
 
 @Serializable
-data class MangaPage(
+class MangaPage(
     val imageUrl: String,
     val width: Int,
     val height: Int,

@@ -1,12 +1,7 @@
-apply plugin: 'com.android.application'
-apply plugin: 'kotlin-android'
-apply plugin: 'kotlinx-serialization'
-
 ext {
-    extName = 'AllAnime'
-    pkgNameSuffix = 'en.allanime'
-    extClass = '.AllAnime'
-    extVersionCode = 6
+    extName = 'AllManga'
+    extClass = '.AllManga'
+    extVersionCode = 9
 }
 
 apply from: "$rootDir/common.gradle"

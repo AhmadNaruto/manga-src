@@ -9,6 +9,7 @@ import eu.kanade.tachiyomi.source.model.Page
 import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
 import eu.kanade.tachiyomi.source.online.ParsedHttpSource
+import keiyoushi.utils.getPreferences
 import okhttp3.Headers
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.Request
@@ -17,13 +18,12 @@ import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
 import rx.Observable
 
-// URL can be found at https://www.wnacglink.top/
 class wnacg : ParsedHttpSource(), ConfigurableSource {
     override val name = "紳士漫畫"
     override val lang = "zh"
     override val supportsLatest = false
 
-    private val preferences = getSharedPreferences(id)
+    private val preferences = getPreferences { preferenceMigration() }
 
     override val baseUrl = when (System.getenv("CI")) {
         "true" -> getCiBaseUrl()
@@ -37,19 +37,19 @@ class wnacg : ParsedHttpSource(), ConfigurableSource {
         .build()
 
     override fun popularMangaSelector() = ".gallary_item"
-    override fun latestUpdatesSelector() = throw Exception("Not used")
+    override fun latestUpdatesSelector() = throw UnsupportedOperationException()
     override fun searchMangaSelector() = popularMangaSelector()
     override fun chapterListSelector() = throw UnsupportedOperationException()
 
     override fun popularMangaNextPageSelector() = "span.thispage + a"
-    override fun latestUpdatesNextPageSelector() = throw Exception("Not used")
+    override fun latestUpdatesNextPageSelector() = throw UnsupportedOperationException()
     override fun searchMangaNextPageSelector() = popularMangaNextPageSelector()
 
     override fun popularMangaRequest(page: Int): Request {
         return GET("$baseUrl/albums-index-page-$page.html", headers)
     }
 
-    override fun latestUpdatesRequest(page: Int) = throw Exception("Not used")
+    override fun latestUpdatesRequest(page: Int) = throw UnsupportedOperationException()
 
     override fun searchMangaRequest(page: Int, query: String, filters: FilterList): Request {
         if (query.isBlank()) {
@@ -64,16 +64,17 @@ class wnacg : ParsedHttpSource(), ConfigurableSource {
             .addQueryParameter("s", "create_time_DESC")
             .addQueryParameter("q", query)
             .addQueryParameter("p", page.toString())
-        return GET(builder.toString(), headers)
+        return GET(builder.build(), headers)
     }
 
-    override fun headersBuilder(): Headers.Builder = super.headersBuilder()
+    override fun headersBuilder() = Headers.Builder()
+        .add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/121.0")
         .set("referer", baseUrl)
         .set("sec-fetch-mode", "no-cors")
         .set("sec-fetch-site", "cross-site")
 
     override fun popularMangaFromElement(element: Element) = mangaFromElement(element)
-    override fun latestUpdatesFromElement(element: Element) = throw Exception("Not used")
+    override fun latestUpdatesFromElement(element: Element) = throw UnsupportedOperationException()
     override fun searchMangaFromElement(element: Element) = mangaFromElement(element)
 
     private fun mangaFromElement(element: Element): SManga {
@@ -119,7 +120,7 @@ class wnacg : ParsedHttpSource(), ConfigurableSource {
     }
 
     override fun pageListParse(response: Response): List<Page> {
-        val regex = """//\S*(jpg|png)""".toRegex()
+        val regex = """//\S*(jpeg|jpg|png|webp|gif)""".toRegex()
         val galleryaid =
             response.body.string()
         return regex.findAll(galleryaid).mapIndexedTo(ArrayList()) { index, match ->
@@ -127,8 +128,8 @@ class wnacg : ParsedHttpSource(), ConfigurableSource {
         }
     }
 
-    override fun chapterFromElement(element: Element) = throw Exception("Not used")
-    override fun imageUrlParse(document: Document) = throw Exception("Not used")
+    override fun chapterFromElement(element: Element) = throw UnsupportedOperationException()
+    override fun imageUrlParse(document: Document) = throw UnsupportedOperationException()
 
     // >>> Filters >>>
 

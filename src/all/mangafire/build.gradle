@@ -1,0 +1,8 @@
+ext {
+    extName = 'MangaFire'
+    extClass = '.MangaFireFactory'
+    extVersionCode = 11
+    isNsfw = true
+}
+
+apply from: "$rootDir/common.gradle"

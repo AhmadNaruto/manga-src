@@ -1,0 +1,7 @@
+ext {
+    extName = 'Zaimanhua'
+    extClass = '.Zaimanhua'
+    extVersionCode = 6
+}
+
+apply from: "$rootDir/common.gradle"

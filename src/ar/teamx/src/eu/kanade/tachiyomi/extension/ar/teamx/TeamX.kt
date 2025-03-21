@@ -1,7 +1,11 @@
 package eu.kanade.tachiyomi.extension.ar.teamx
 
+import android.content.SharedPreferences
+import android.widget.Toast
+import androidx.preference.PreferenceScreen
 import eu.kanade.tachiyomi.network.GET
 import eu.kanade.tachiyomi.network.interceptor.rateLimit
+import eu.kanade.tachiyomi.source.ConfigurableSource
 import eu.kanade.tachiyomi.source.model.FilterList
 import eu.kanade.tachiyomi.source.model.MangasPage
 import eu.kanade.tachiyomi.source.model.Page
@@ -9,6 +13,7 @@ import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
 import eu.kanade.tachiyomi.source.online.ParsedHttpSource
 import eu.kanade.tachiyomi.util.asJsoup
+import keiyoushi.utils.getPreferencesLazy
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
@@ -18,11 +23,13 @@ import java.text.SimpleDateFormat
 import java.util.Locale
 import java.util.concurrent.TimeUnit
 
-class TeamX : ParsedHttpSource() {
+class TeamX : ParsedHttpSource(), ConfigurableSource {
 
     override val name = "Team X"
 
-    override val baseUrl = "https://team1x12.com"
+    private val defaultBaseUrl = "https://olympustaff.com"
+
+    override val baseUrl by lazy { getPrefBaseUrl() }
 
     override val lang = "ar"
 
@@ -33,6 +40,8 @@ class TeamX : ParsedHttpSource() {
         .readTimeout(30, TimeUnit.SECONDS)
         .rateLimit(10, 1, TimeUnit.SECONDS)
         .build()
+
+    private val preferences: SharedPreferences by getPreferencesLazy()
 
     // Popular
 
@@ -130,6 +139,14 @@ class TeamX : ParsedHttpSource() {
             }
             genre = document.select("div.review-author-info a").joinToString { it.text() }
             thumbnail_url = document.select("div.text-right img").first()!!.absUrl("src")
+            status = document
+                .selectFirst(".full-list-info > small:first-child:contains(الحالة) + small")
+                ?.text()
+                .toStatus()
+            author = document
+                .selectFirst(".full-list-info > small:first-child:contains(الرسام) + small")
+                ?.text()
+                ?.takeIf { it != "غير معروف" }
         }
     }
 
@@ -187,6 +204,14 @@ class TeamX : ParsedHttpSource() {
         }.getOrNull() ?: 0
     }
 
+    private fun String?.toStatus() = when (this) {
+        "مستمرة" -> SManga.ONGOING
+        "قادم قريبًا" -> SManga.ONGOING // "coming soon"
+        "مكتمل" -> SManga.COMPLETED
+        "متوقف" -> SManga.ON_HIATUS
+        else -> SManga.UNKNOWN
+    }
+
     // Pages
 
     override fun pageListParse(document: Document): List<Page> {
@@ -195,5 +220,42 @@ class TeamX : ParsedHttpSource() {
         }
     }
 
-    override fun imageUrlParse(document: Document): String = throw UnsupportedOperationException("Not used")
+    override fun imageUrlParse(document: Document): String = throw UnsupportedOperationException()
+
+    companion object {
+        private const val RESTART_APP = ".لتطبيق الإعدادات الجديدة أعد تشغيل التطبيق"
+        private const val BASE_URL_PREF_TITLE = "تعديل الرابط"
+        private const val BASE_URL_PREF = "overrideBaseUrl"
+        private const val BASE_URL_PREF_SUMMARY = ".للاستخدام المؤقت. تحديث التطبيق سيؤدي الى حذف الإعدادات"
+        private const val DEFAULT_BASE_URL_PREF = "defaultBaseUrl"
+    }
+
+    override fun setupPreferenceScreen(screen: PreferenceScreen) {
+        val baseUrlPref = androidx.preference.EditTextPreference(screen.context).apply {
+            key = BASE_URL_PREF
+            title = BASE_URL_PREF_TITLE
+            summary = BASE_URL_PREF_SUMMARY
+            this.setDefaultValue(defaultBaseUrl)
+            dialogTitle = BASE_URL_PREF_TITLE
+            dialogMessage = "Default: $defaultBaseUrl"
+
+            setOnPreferenceChangeListener { _, _ ->
+                Toast.makeText(screen.context, RESTART_APP, Toast.LENGTH_LONG).show()
+                true
+            }
+        }
+        screen.addPreference(baseUrlPref)
+    }
+    private fun getPrefBaseUrl(): String = preferences.getString(BASE_URL_PREF, defaultBaseUrl)!!
+
+    init {
+        preferences.getString(DEFAULT_BASE_URL_PREF, null).let { prefDefaultBaseUrl ->
+            if (prefDefaultBaseUrl != defaultBaseUrl) {
+                preferences.edit()
+                    .putString(BASE_URL_PREF, defaultBaseUrl)
+                    .putString(DEFAULT_BASE_URL_PREF, defaultBaseUrl)
+                    .apply()
+            }
+        }
+    }
 }

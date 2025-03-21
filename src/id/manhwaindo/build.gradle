@@ -1,0 +1,10 @@
+ext {
+    extName = 'Manhwa Indo'
+    extClass = '.ManhwaIndo'
+    themePkg = 'mangathemesia'
+    baseUrl = 'https://manhwaindo.one'
+    overrideVersionCode = 6
+    isNsfw = true
+}
+
+apply from: "$rootDir/common.gradle"

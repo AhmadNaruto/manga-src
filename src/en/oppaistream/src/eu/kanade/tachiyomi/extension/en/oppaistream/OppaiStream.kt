@@ -11,12 +11,12 @@ import eu.kanade.tachiyomi.source.online.ParsedHttpSource
 import eu.kanade.tachiyomi.util.asJsoup
 import okhttp3.Headers
 import okhttp3.HttpUrl.Companion.toHttpUrl
-import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
 import rx.Observable
+import java.net.URLDecoder
 import java.util.Calendar
 
 class OppaiStream : ParsedHttpSource() {
@@ -31,10 +31,10 @@ class OppaiStream : ParsedHttpSource() {
 
     override val supportsLatest = true
 
-    override val client: OkHttpClient = network.cloudflareClient
+    override val client = network.cloudflareClient
 
     override fun headersBuilder(): Headers.Builder = super.headersBuilder()
-        .add("Referer", baseUrl)
+        .add("Referer", "$baseUrl/")
 
     // popular
     override fun popularMangaRequest(page: Int): Request {
@@ -84,22 +84,20 @@ class OppaiStream : ParsedHttpSource() {
                         addQueryParameter("order", filter.selectedValue())
                     }
                     is GenreListFilter -> {
-                        val genresInclude = filter.state.filter { it.state == Filter.TriState.STATE_INCLUDE }.map { genre -> genre.value }
-                        val genresExclude = filter.state.filter { it.state == Filter.TriState.STATE_EXCLUDE }.map { genre -> genre.value }
-                        addQueryParameter("genres", genresInclude.joinToString(",") { it })
-                        addQueryParameter("blacklist", genresExclude.joinToString(",") { it })
+                        addQueryParameter("genres", filter.state.filter { it.isIncluded() }.joinToString(",") { it.value })
+                        addQueryParameter("blacklist", filter.state.filter { it.isExcluded() }.joinToString(",") { it.value })
                     }
                     else -> {}
                 }
             }
             addQueryParameter("page", "$page")
-            addQueryParameter("limit", "$searchLimit")
+            addQueryParameter("limit", "$SEARCH_LIMIT")
         }.build()
 
         return GET(url, headers)
     }
 
-    override fun searchMangaSelector() = "div.in-grid"
+    override fun searchMangaSelector() = "div.in-grid > a"
 
     override fun searchMangaParse(response: Response): MangasPage {
         val document = response.asJsoup()
@@ -109,16 +107,22 @@ class OppaiStream : ParsedHttpSource() {
             searchMangaFromElement(element)
         }
 
-        val hasNextPage = elements.size >= searchLimit
+        val hasNextPage = elements.size >= SEARCH_LIMIT
 
         return MangasPage(mangas, hasNextPage)
     }
 
     override fun searchMangaFromElement(element: Element): SManga {
         return SManga.create().apply {
-            thumbnail_url = element.select(".split-1 img").attr("src")
-            title = element.select("a div h3").text()
-            setUrlWithoutDomain(element.select("a").attr("href"))
+            thumbnail_url = element.select("img.read-cover").attr("src")
+            title = element.select("h3.man-title").text()
+            val rawUrl = element.absUrl("href")
+            val url = if (rawUrl.contains("/fw?to=")) {
+                URLDecoder.decode(rawUrl.substringAfter("/fw?to="), "UTF-8")
+            } else {
+                rawUrl
+            }
+            setUrlWithoutDomain(url)
         }
     }
 
@@ -129,9 +133,9 @@ class OppaiStream : ParsedHttpSource() {
         return SManga.create().apply {
             thumbnail_url = document.select(".cover-img").attr("src")
             document.select(".manhwa-info-in").let { it ->
-                it.select("h1").text().let {
-                    title = it.substringBeforeLast("By").trim()
-                    author = it.substringAfterLast("By").trim()
+                it.select("h1").run {
+                    title = text().substringBeforeLast("By").trim()
+                    author = select("a.red").text().trim()
                     artist = author
                 }
                 genre = it.select(".genres h5").joinToString { it.text() }
@@ -186,6 +190,7 @@ class OppaiStream : ParsedHttpSource() {
     private class OrderByFilter(defaultOrder: String? = null) : SelectFilter(
         "Sort By",
         arrayOf(
+            Pair("", ""),
             Pair("A-Z", "az"),
             Pair("Z-A", "za"),
             Pair("Recently Released", "recent"),
@@ -280,7 +285,7 @@ class OppaiStream : ParsedHttpSource() {
 
     // Unused
     override fun imageUrlParse(document: Document): String {
-        throw UnsupportedOperationException("Not used")
+        throw UnsupportedOperationException()
     }
 
     // helpers
@@ -334,7 +339,7 @@ class OppaiStream : ParsedHttpSource() {
     }
 
     companion object {
-        const val searchLimit = 36
+        const val SEARCH_LIMIT = 36
         const val SLUG_SEARCH_PREFIX = "slug:"
     }
 }

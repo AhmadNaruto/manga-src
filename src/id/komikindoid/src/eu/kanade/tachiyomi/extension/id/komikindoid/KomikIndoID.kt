@@ -7,7 +7,7 @@ import eu.kanade.tachiyomi.source.model.Page
 import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
 import eu.kanade.tachiyomi.source.online.ParsedHttpSource
-import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.jsoup.nodes.Document
@@ -18,13 +18,13 @@ import java.util.Locale
 
 class KomikIndoID : ParsedHttpSource() {
     override val name = "KomikIndoID"
-    override val baseUrl = "https://komikindo.tv"
+    override val baseUrl = "https://komikindo.pw"
     override val lang = "id"
     override val supportsLatest = true
     override val client: OkHttpClient = network.cloudflareClient
     private val dateFormat: SimpleDateFormat = SimpleDateFormat("MMM d, yyyy", Locale.US)
 
-    // similar/modified theme of "https://bacakomik.co"
+    // similar/modified theme of "https://bacakomik.one"
     override fun popularMangaRequest(page: Int): Request {
         return GET("$baseUrl/daftar-manga/page/$page/?order=popular", headers)
     }
@@ -55,7 +55,7 @@ class KomikIndoID : ParsedHttpSource() {
     }
 
     override fun searchMangaRequest(page: Int, query: String, filters: FilterList): Request {
-        val url = "$baseUrl/daftar-manga/page/$page/".toHttpUrlOrNull()!!.newBuilder()
+        val url = "$baseUrl/daftar-manga/page/$page/".toHttpUrl().newBuilder()
             .addQueryParameter("title", query)
         filters.forEach { filter ->
             when (filter) {
@@ -120,7 +120,7 @@ class KomikIndoID : ParsedHttpSource() {
                 else -> {}
             }
         }
-        return GET(url.toString(), headers)
+        return GET(url.build(), headers)
     }
     override fun mangaDetailsParse(document: Document): SManga {
         val infoElement = document.select("div.infoanime").first()!!
@@ -170,25 +170,25 @@ class KomikIndoID : ParsedHttpSource() {
             val value = date.split(' ')[0].toInt()
             when {
                 "detik" in date -> Calendar.getInstance().apply {
-                    add(Calendar.SECOND, value * -1)
+                    add(Calendar.SECOND, -value)
                 }.timeInMillis
                 "menit" in date -> Calendar.getInstance().apply {
-                    add(Calendar.MINUTE, value * -1)
+                    add(Calendar.MINUTE, -value)
                 }.timeInMillis
                 "jam" in date -> Calendar.getInstance().apply {
-                    add(Calendar.HOUR_OF_DAY, value * -1)
+                    add(Calendar.HOUR_OF_DAY, -value)
                 }.timeInMillis
                 "hari" in date -> Calendar.getInstance().apply {
-                    add(Calendar.DATE, value * -1)
+                    add(Calendar.DATE, -value)
                 }.timeInMillis
                 "minggu" in date -> Calendar.getInstance().apply {
-                    add(Calendar.DATE, value * 7 * -1)
+                    add(Calendar.DATE, -value * 7)
                 }.timeInMillis
                 "bulan" in date -> Calendar.getInstance().apply {
-                    add(Calendar.MONTH, value * -1)
+                    add(Calendar.MONTH, -value)
                 }.timeInMillis
                 "tahun" in date -> Calendar.getInstance().apply {
-                    add(Calendar.YEAR, value * -1)
+                    add(Calendar.YEAR, -value)
                 }.timeInMillis
                 else -> {
                     0L
@@ -227,7 +227,7 @@ class KomikIndoID : ParsedHttpSource() {
         return pages
     }
 
-    override fun imageUrlParse(document: Document): String = throw UnsupportedOperationException("Not Used")
+    override fun imageUrlParse(document: Document): String = throw UnsupportedOperationException()
 
     override fun getFilterList() = FilterList(
         SortFilter(),

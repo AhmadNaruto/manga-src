@@ -16,6 +16,7 @@ import eu.kanade.tachiyomi.util.asJsoup
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.float
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
@@ -25,6 +26,7 @@ import okhttp3.CookieJar
 import okhttp3.FormBody
 import okhttp3.Headers
 import okhttp3.HttpUrl
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
@@ -106,8 +108,7 @@ class ComX : ParsedHttpSource() {
         }
         .build()
 
-    override fun headersBuilder(): Headers.Builder = Headers.Builder()
-        .add("User-Agent", "Tachiyomi")
+    override fun headersBuilder(): Headers.Builder = super.headersBuilder()
         .add("Referer", baseUrl)
 
     // Popular
@@ -167,16 +168,12 @@ class ComX : ParsedHttpSource() {
     // Search
     override fun searchMangaRequest(page: Int, query: String, filters: FilterList): Request {
         if (query.isNotEmpty()) {
-            return POST(
-                "$baseUrl/index.php?do=search",
-                body = FormBody.Builder()
-                    .add("do", "search")
-                    .add("subaction", "search")
-                    .add("story", query)
-                    .add("search_start", page.toString())
-                    .build(),
-                headers = headers,
-            )
+            val url = baseUrl.toHttpUrl().newBuilder().apply {
+                addPathSegment("search")
+                addPathSegment(query)
+                addPathSegments("page/$page")
+            }.build()
+            return GET(url, headers)
         }
         val mutableGenre = mutableListOf<String>()
         val mutableType = mutableListOf<String>()
@@ -315,14 +312,7 @@ class ComX : ParsedHttpSource() {
 
         val chapters: List<SChapter>? = chaptersList?.map {
             val chapter = SChapter.create()
-            // Usually "title" is main chapter name info, "title_en" is additional chapter name info.
-            // I decided to keep them both because who knows where they decided to put useful info today.
-            // Except when they are the same.
-            chapter.name = if (it.jsonObject["title"]!!.jsonPrimitive.content == it.jsonObject["title_en"]!!.jsonPrimitive.content) {
-                it.jsonObject["title"]!!.jsonPrimitive.content
-            } else {
-                (it.jsonObject["title"]!!.jsonPrimitive.content + " " + it.jsonObject["title_en"]!!.jsonPrimitive.content).trim()
-            }
+            chapter.name = it.jsonObject["title"]!!.jsonPrimitive.contentOrNull.toString()
             chapter.date_upload = simpleDateFormat.parse(it.jsonObject["date"]!!.jsonPrimitive.content)?.time ?: 0L
             chapter.chapter_number = it.jsonObject["posi"]!!.jsonPrimitive.float
             // when it is Event add reading order numbers as prefix

@@ -1,6 +1,5 @@
 package eu.kanade.tachiyomi.extension.en.madokami
 
-import android.app.Application
 import android.content.SharedPreferences
 import android.text.InputType
 import eu.kanade.tachiyomi.network.GET
@@ -10,20 +9,19 @@ import eu.kanade.tachiyomi.source.model.Page
 import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
 import eu.kanade.tachiyomi.source.online.ParsedHttpSource
+import keiyoushi.utils.getPreferencesLazy
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.Credentials
 import okhttp3.HttpUrl
-import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
-import uy.kohesive.injekt.Injekt
-import uy.kohesive.injekt.api.get
 import uy.kohesive.injekt.injectLazy
 import java.io.IOException
 import java.net.URLDecoder
@@ -42,9 +40,7 @@ class Madokami : ConfigurableSource, ParsedHttpSource() {
 
     private val dateFormat = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.ENGLISH)
 
-    private val preferences: SharedPreferences by lazy {
-        Injekt.get<Application>().getSharedPreferences("source_$id", 0x0000)
-    }
+    private val preferences: SharedPreferences by getPreferencesLazy()
 
     private fun authenticate(request: Request): Request {
         val credential = Credentials.basic(preferences.getString("username", "")!!, preferences.getString("password", "")!!)
@@ -58,16 +54,19 @@ class Madokami : ConfigurableSource, ParsedHttpSource() {
     }.build()
 
     override fun latestUpdatesSelector() = ""
-    override fun latestUpdatesFromElement(element: Element): SManga = throw Exception("Unsupported!")
+    override fun latestUpdatesFromElement(element: Element): SManga = throw UnsupportedOperationException()
     override fun latestUpdatesNextPageSelector(): String? = null
-    override fun latestUpdatesRequest(page: Int) = throw Exception("Unsupported!")
+    override fun latestUpdatesRequest(page: Int) = throw UnsupportedOperationException()
 
     override fun popularMangaSelector(): String = "table.mobile-files-table tbody tr td:nth-child(1) a:nth-child(1)"
 
     override fun popularMangaFromElement(element: Element): SManga {
         val manga = SManga.create()
         manga.url = element.attr("href")
-        manga.title = URLDecoder.decode(element.attr("href").split("/").last(), "UTF-8").trimStart('!')
+        val pathSegments = element.attr("href").split("/")
+        var i = pathSegments.size
+        manga.description = URLDecoder.decode(pathSegments[i - 1], "UTF-8")
+        do { i--; manga.title = URLDecoder.decode(pathSegments[i], "UTF-8") } while (URLDecoder.decode(pathSegments[i], "UTF-8").startsWith("!"))
         return manga
     }
 
@@ -84,7 +83,7 @@ class Madokami : ConfigurableSource, ParsedHttpSource() {
     override fun searchMangaNextPageSelector(): String? = null
 
     override fun mangaDetailsRequest(manga: SManga): Request {
-        val url = (baseUrl + manga.url).toHttpUrlOrNull()!!
+        val url = (baseUrl + manga.url).toHttpUrl()
         if (url.pathSize > 5 && url.pathSegments[0] == "Manga" && url.pathSegments[1].length == 1) {
             val builder = url.newBuilder()
             for (i in 5 until url.pathSize) { builder.removePathSegment(5) }
@@ -109,8 +108,7 @@ class Madokami : ConfigurableSource, ParsedHttpSource() {
     override fun mangaDetailsParse(document: Document): SManga {
         val manga = SManga.create()
         manga.author = document.select("a[itemprop=\"author\"]").joinToString(", ") { it.text() }
-        manga.description = "Tags: " + document.select("div.genres[itemprop=\"keywords\"] a.tag.tag-category").joinToString(", ") { it.text() }
-        manga.genre = document.select("div.genres a.tag[itemprop=\"genre\"]").joinToString(", ") { it.text() }
+        manga.genre = document.select("div.genres a.tag").joinToString(", ") { it.text() }
         manga.status = if (document.select("span.scanstatus").text() == "Yes") SManga.COMPLETED else SManga.UNKNOWN
         manga.thumbnail_url = document.select("div.manga-info img[itemprop=\"image\"]").attr("src")
         return manga
@@ -135,7 +133,8 @@ class Madokami : ConfigurableSource, ParsedHttpSource() {
     override fun chapterFromElement(element: Element): SChapter {
         val el = element.parent()!!.parent()!!
         val chapter = SChapter.create()
-        chapter.url = el.select("td:nth-child(6) a").attr("href")
+        chapter.url = "/reader" + el.select("td:nth-child(6) a").attr("href")
+            .substringAfter("/reader")
         chapter.name = el.select("td:nth-child(1) a").text()
         val date = el.select("td:nth-child(3)").text()
         if (date.endsWith("ago")) {
@@ -160,7 +159,10 @@ class Madokami : ConfigurableSource, ParsedHttpSource() {
         return chapter
     }
 
-    override fun pageListRequest(chapter: SChapter) = authenticate(GET(chapter.url, headers))
+    override fun pageListRequest(chapter: SChapter): Request {
+        require(chapter.url.startsWith("/")) { "Refresh chapter list" }
+        return authenticate(GET(baseUrl + chapter.url, headers))
+    }
 
     override fun pageListParse(document: Document): List<Page> {
         val element = document.select("div#reader")

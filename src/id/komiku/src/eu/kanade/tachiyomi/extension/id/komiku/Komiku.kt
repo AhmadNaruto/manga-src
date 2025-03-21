@@ -7,7 +7,7 @@ import eu.kanade.tachiyomi.source.model.Page
 import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
 import eu.kanade.tachiyomi.source.online.ParsedHttpSource
-import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.jsoup.nodes.Document
@@ -21,7 +21,7 @@ class Komiku : ParsedHttpSource() {
 
     override val baseUrl = "https://komiku.id"
 
-    private val baseUrlData = "https://data.komiku.id"
+    private val baseUrlApi = "https://api.komiku.id"
 
     override val lang = "id"
 
@@ -34,9 +34,9 @@ class Komiku : ParsedHttpSource() {
 
     override fun popularMangaRequest(page: Int): Request {
         return if (page == 1) {
-            GET("$baseUrl/other/hot/?orderby=meta_value_num", headers)
+            GET("$baseUrlApi/other/hot/?orderby=meta_value_num", headers)
         } else {
-            GET("$baseUrl/other/hot/page/$page/?orderby=meta_value_num", headers)
+            GET("$baseUrlApi/other/hot/page/$page/?orderby=meta_value_num", headers)
         }
     }
 
@@ -51,25 +51,25 @@ class Komiku : ParsedHttpSource() {
 
         // scraped image doesn't make for a good cover; so try to transform it
         // make it take bad cover instead of null if it contains upload date as those URLs aren't very useful
-        if (element.select("img").attr("data-src").contains(coverUploadRegex)) {
-            manga.thumbnail_url = element.select("img").attr("data-src")
+        if (element.select("img").attr("abs:src").contains(coverUploadRegex)) {
+            manga.thumbnail_url = element.select("img").attr("abs:src")
         } else {
-            manga.thumbnail_url = element.select("img").attr("data-src").substringBeforeLast("?").replace(coverRegex, "/Komik-")
+            manga.thumbnail_url = element.select("img").attr("abs:src").substringBeforeLast("?").replace(coverRegex, "/Komik-")
         }
 
         return manga
     }
 
-    override fun popularMangaNextPageSelector() = ".pag-nav a.next"
+    override fun popularMangaNextPageSelector() = "#hxloading + [hx-trigger=revealed]"
 
     // latest
     override fun latestUpdatesSelector() = popularMangaSelector()
 
     override fun latestUpdatesRequest(page: Int): Request {
         return if (page == 1) {
-            GET("$baseUrlData/cari/?post_type=manga&s=&orderby=modified", headers)
+            GET("$baseUrlApi/other/hot/?orderby=modified&category_name=", headers)
         } else {
-            GET("$baseUrlData/cari/page/$page/?post_type=manga&s=&orderby=modified", headers)
+            GET("$baseUrlApi/other/hot/page/$page/?orderby=modified&category_name=", headers)
         }
     }
 
@@ -81,7 +81,7 @@ class Komiku : ParsedHttpSource() {
     override fun searchMangaSelector() = popularMangaSelector()
 
     override fun searchMangaRequest(page: Int, query: String, filters: FilterList): Request {
-        var url = "$baseUrlData/page/$page/?post_type=manga".toHttpUrlOrNull()?.newBuilder()!!.addQueryParameter("s", query)
+        var url = "$baseUrlApi/page/$page/?post_type=manga".toHttpUrl().newBuilder().addQueryParameter("s", query)
         (if (filters.isEmpty()) getFilterList() else filters).forEach { filter ->
             when (filter) {
                 is CategoryNames -> {
@@ -107,13 +107,13 @@ class Komiku : ParsedHttpSource() {
                 is ProjectList -> {
                     val project = filter.values[filter.state]
                     if (project.key == "project-filter-on") {
-                        url = ("$baseUrl/pustaka" + if (page > 1) "/page/$page/" else "" + "?tipe=projek").toHttpUrlOrNull()!!.newBuilder()
+                        url = ("$baseUrl/pustaka" + if (page > 1) "/page/$page/" else "" + "?tipe=projek").toHttpUrl().newBuilder()
                     }
                 }
                 else -> {}
             }
         }
-        return GET(url.toString(), headers)
+        return GET(url.build(), headers)
     }
 
     override fun searchMangaFromElement(element: Element) = popularMangaFromElement(element)
@@ -304,5 +304,5 @@ class Komiku : ParsedHttpSource() {
         }
     }
 
-    override fun imageUrlParse(document: Document): String = throw UnsupportedOperationException("Not Used")
+    override fun imageUrlParse(document: Document): String = throw UnsupportedOperationException()
 }

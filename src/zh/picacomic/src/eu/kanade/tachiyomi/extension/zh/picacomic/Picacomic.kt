@@ -1,6 +1,5 @@
 package eu.kanade.tachiyomi.extension.zh.picacomic
 
-import android.app.Application
 import android.content.SharedPreferences
 import android.util.Base64
 import androidx.preference.EditTextPreference
@@ -16,6 +15,7 @@ import eu.kanade.tachiyomi.source.model.Page
 import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
 import eu.kanade.tachiyomi.source.online.HttpSource
+import keiyoushi.utils.getPreferences
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -26,11 +26,7 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
-import org.json.JSONObject
-import uy.kohesive.injekt.Injekt
-import uy.kohesive.injekt.api.get
 import java.net.URLEncoder
-import java.nio.charset.Charset
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -43,8 +39,7 @@ class Picacomic : HttpSource(), ConfigurableSource {
     override val baseUrl = "https://picaapi.picacomic.com"
     private val leeway: Long = 10
 
-    private val preferences: SharedPreferences =
-        Injekt.get<Application>().getSharedPreferences("source_$id", 0x0000)
+    private val preferences: SharedPreferences = getPreferences()
 
     private val blocklist = preferences.getString("BLOCK_GENRES", "")!!
         .split(',').map { it.trim() }
@@ -101,12 +96,19 @@ class Picacomic : HttpSource(), ConfigurableSource {
             )
         }
 
-        val payload = parts[1]?.let { JSONObject(Base64.decode(it, Base64.DEFAULT).toString(Charsets.UTF_8)) }
+        val payload = parts[1]?.let {
+            json.decodeFromString<PicaJWTPayload>(
+                Base64.decode(
+                    it,
+                    Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING,
+                ).toString(Charsets.UTF_8),
+            )
+        }
 
-        val exp = payload?.getLong("exp")?.let {
+        val exp = payload?.exp?.let {
             Date(it * 1000)
         }
-        val iat = payload?.getLong("iat")?.let {
+        val iat = payload?.iat?.let {
             Date(it * 1000)
         }
 

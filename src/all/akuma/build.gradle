@@ -1,11 +1,7 @@
-apply plugin: 'com.android.application'
-apply plugin: 'kotlin-android'
-
 ext {
     extName = 'Akuma'
-    pkgNameSuffix = 'all.akuma'
-    extClass = '.Akuma'
-    extVersionCode = 1
+    extClass = '.AkumaFactory'
+    extVersionCode = 6
     isNsfw = true
 }
 

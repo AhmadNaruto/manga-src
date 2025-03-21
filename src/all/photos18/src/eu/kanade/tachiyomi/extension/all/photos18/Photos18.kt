@@ -1,6 +1,5 @@
 package eu.kanade.tachiyomi.extension.all.photos18
 
-import android.app.Application
 import androidx.preference.PreferenceScreen
 import androidx.preference.SwitchPreferenceCompat
 import eu.kanade.tachiyomi.network.GET
@@ -13,6 +12,7 @@ import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
 import eu.kanade.tachiyomi.source.online.HttpSource
 import eu.kanade.tachiyomi.util.asJsoup
+import keiyoushi.utils.getPreferencesLazy
 import okhttp3.Headers
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
@@ -21,8 +21,6 @@ import okhttp3.Response
 import org.jsoup.nodes.Document
 import org.jsoup.select.Evaluator
 import rx.Observable
-import uy.kohesive.injekt.Injekt
-import uy.kohesive.injekt.api.get
 
 class Photos18 : HttpSource(), ConfigurableSource {
     override val name = "Photos18"
@@ -34,7 +32,7 @@ class Photos18 : HttpSource(), ConfigurableSource {
     private val baseUrlWithLang get() = if (useTrad) baseUrl else "$baseUrl/zh-hans"
     private fun String.stripLang() = removePrefix("/zh-hans")
 
-    override val client = network.client.newBuilder().followRedirects(false).build()
+    override val client = network.cloudflareClient.newBuilder().followRedirects(false).build()
 
     override fun headersBuilder() = Headers.Builder().apply {
         add("Referer", baseUrl)
@@ -51,7 +49,7 @@ class Photos18 : HttpSource(), ConfigurableSource {
             SManga.create().apply {
                 url = link.attr("href").stripLang()
                 title = link.ownText()
-                thumbnail_url = baseUrl + it.selectFirst(Evaluator.Tag("img"))!!.attr("data-src")
+                thumbnail_url = baseUrl + it.selectFirst(Evaluator.Tag("img"))!!.attr("src")
                 genre = cardBody.selectFirst(Evaluator.Tag("label"))!!.ownText()
                 status = SManga.COMPLETED
                 initialized = true
@@ -76,35 +74,35 @@ class Photos18 : HttpSource(), ConfigurableSource {
             if (filter is QueryFilter) filter.addQueryTo(url)
         }
 
-        return GET(url.toString(), headers)
+        return GET(url.build(), headers)
     }
 
     override fun searchMangaParse(response: Response) = popularMangaParse(response)
 
     override fun fetchMangaDetails(manga: SManga): Observable<SManga> = Observable.just(manga)
 
-    override fun mangaDetailsParse(response: Response) = throw UnsupportedOperationException("Not used.")
+    override fun mangaDetailsParse(response: Response) = throw UnsupportedOperationException()
 
     override fun fetchChapterList(manga: SManga): Observable<List<SChapter>> {
         val chapter = SChapter.create().apply {
             url = manga.url
-            name = manga.title
-            chapter_number = -2f
+            name = "Gallery"
+            chapter_number = 0f
         }
         return Observable.just(listOf(chapter))
     }
 
-    override fun chapterListParse(response: Response) = throw UnsupportedOperationException("Not used.")
+    override fun chapterListParse(response: Response) = throw UnsupportedOperationException()
 
     override fun pageListParse(response: Response): List<Page> {
         val document = response.asJsoup()
         val images = document.selectFirst(Evaluator.Id("content"))!!.select(Evaluator.Tag("img"))
         return images.mapIndexed { index, image ->
-            Page(index, imageUrl = image.attr("data-src"))
+            Page(index, imageUrl = image.attr("src"))
         }
     }
 
-    override fun imageUrlParse(response: Response) = throw UnsupportedOperationException("Not used.")
+    override fun imageUrlParse(response: Response) = throw UnsupportedOperationException()
 
     override fun getFilterList() = FilterList(
         SortFilter(),
@@ -156,9 +154,7 @@ class Photos18 : HttpSource(), ConfigurableSource {
         }
     }
 
-    private val preferences by lazy {
-        Injekt.get<Application>().getSharedPreferences("source_$id", 0x0000)!!
-    }
+    private val preferences by getPreferencesLazy()
 
     private val useTrad get() = preferences.getBoolean("ZH_HANT", false)
 

@@ -1,11 +1,7 @@
-apply plugin: 'com.android.application'
-apply plugin: 'kotlin-android'
-
 ext {
     extName = 'Comicabc'
-    pkgNameSuffix = 'zh.comicabc'
     extClass = '.Comicabc'
-    extVersionCode = 1
+    extVersionCode = 2
 }
 
 apply from: "$rootDir/common.gradle"

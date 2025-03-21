@@ -1,12 +1,10 @@
-apply plugin: 'com.android.application'
-apply plugin: 'kotlin-android'
-apply plugin: 'kotlinx-serialization'
-
 ext {
     extName = 'FMTEAM'
-    pkgNameSuffix = 'fr.fmteam'
     extClass = '.FMTEAM'
-    extVersionCode = 2
+    themePkg = 'pizzareader'
+    baseUrl = 'https://fmteam.fr'
+    overrideVersionCode = 3
+    isNsfw = false
 }
 
 apply from: "$rootDir/common.gradle"

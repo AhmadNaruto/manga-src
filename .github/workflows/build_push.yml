@@ -4,9 +4,12 @@ on:
   push:
     branches:
       - main
-    paths-ignore:
-      - '**.md'
-      - '.github/workflows/issue_moderator.yml'
+    paths:
+      - '**'
+      - '!**.md'
+      - '!.github/**'
+      - '.github/scripts/**'
+      - '.github/workflows/build_push.yml'
 
 concurrency:
   group: ${{ github.workflow }}
@@ -14,172 +17,105 @@ concurrency:
 
 env:
   CI_CHUNK_SIZE: 65
+  IS_PR_CHECK: false
 
 jobs:
   prepare:
     name: Prepare job
-    runs-on: ubuntu-latest
+    runs-on: 'ubuntu-24.04'
     outputs:
-      individualMatrix: ${{ steps.generate-matrices.outputs.individualMatrix }}
-      multisrcMatrix: ${{ steps.generate-matrices.outputs.multisrcMatrix }}
-    env:
-      CI_MODULE_GEN: true
+      matrix: ${{ steps.generate-matrices.outputs.matrix }}
+      delete: ${{ steps.generate-matrices.outputs.delete }}
     steps:
-      - name: Clone repo
-        uses: actions/checkout@v4
-
-      - name: Validate Gradle Wrapper
-        uses: gradle/wrapper-validation-action@v1
-
-      - name: Set up JDK
-        uses: actions/setup-java@v4
+      - name: Checkout main branch
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
-          java-version: 11
-          distribution: adopt
+          fetch-depth: 0
 
-      - name: Generate multisrc sources
-        uses: gradle/gradle-build-action@v2
+      - name: Set up Java
+        uses: actions/setup-java@3a4f6e1af504cf6a31855fa899c6aa5355ba6c12 # v4.7.0
         with:
-          arguments: :multisrc:generateExtensions
+          java-version: 17
+          distribution: temurin
 
-      - name: Get number of modules
-        run: |
-          set -x
-          ./gradlew -q projects | grep '.*extensions\:\(individual\|multisrc\)\:.*\:.*' > projects.txt
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@94baf225fe0a508e581a564467443d0e2379123b # v4.3.0
+        with:
+          cache-read-only: true
 
-          echo "NUM_INDIVIDUAL_MODULES=$(cat projects.txt | grep '.*\:individual\:.*' | wc -l)" >> $GITHUB_ENV
-          echo "NUM_MULTISRC_MODULES=$(cat projects.txt | grep '.*\:multisrc\:.*' | wc -l)" >> $GITHUB_ENV
-
+      - name: Get last successful CI commit
+        id: last_successful_ci_commit
+        uses: nrwl/nx-set-shas@dbe0650947e5f2c81f59190a38512cf49126fe6b # v4.3.0
+      
       - id: generate-matrices
         name: Create output matrices
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const numIndividualModules = process.env.NUM_INDIVIDUAL_MODULES;
-            const numMultisrcModules = process.env.NUM_MULTISRC_MODULES;
-            const chunkSize = process.env.CI_CHUNK_SIZE;
+        run: |
+          python ./.github/scripts/generate-build-matrices.py ${{ steps.last_successful_ci_commit.outputs.base }} Release
 
-            const numIndividualChunks = Math.ceil(numIndividualModules / chunkSize);
-            const numMultisrcChunks = Math.ceil(numMultisrcModules / chunkSize);
-
-            console.log(`Individual modules: ${numIndividualModules} (${numIndividualChunks} chunks of ${chunkSize})`);
-            console.log(`Multi-source modules: ${numMultisrcModules} (${numMultisrcChunks} chunks of ${chunkSize})`);
-
-            core.setOutput('individualMatrix', { 'chunk': [...Array(numIndividualChunks).keys()] });
-            core.setOutput('multisrcMatrix', { 'chunk': [...Array(numMultisrcChunks).keys()] });
-
-  build_multisrc:
-    name: Build multisrc modules
+  build:
+    name: Build extensions (${{ matrix.chunk.number }})
     needs: prepare
-    runs-on: ubuntu-latest
+    runs-on: 'ubuntu-24.04'
+    if: ${{ toJson(fromJson(needs.prepare.outputs.matrix).chunk) != '[]' }}
     strategy:
-      matrix: ${{ fromJSON(needs.prepare.outputs.multisrcMatrix) }}
+      matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
     steps:
       - name: Checkout main branch
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
-      - name: Set up JDK
-        uses: actions/setup-java@v4
+      - name: Set up Java
+        uses: actions/setup-java@3a4f6e1af504cf6a31855fa899c6aa5355ba6c12 # v4.7.0
         with:
-          java-version: 11
-          distribution: adopt
+          java-version: 17
+          distribution: temurin
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@94baf225fe0a508e581a564467443d0e2379123b # v4.3.0
+        with:
+          cache-read-only: ${{ matrix.chunk.number > 1 }}
 
       - name: Prepare signing key
         run: |
           echo ${{ secrets.SIGNING_KEY }} | base64 -d > signingkey.jks
 
-      - name: Generate sources from the multi-source library
-        uses: gradle/gradle-build-action@v2
+      - name: Build extensions (${{ matrix.chunk.number }})
         env:
-          CI_MODULE_GEN: "true"
-        with:
-          arguments: :multisrc:generateExtensions
-
-      - name: Build extensions (chunk ${{ matrix.chunk }})
-        uses: gradle/gradle-build-action@v2
-        env:
-          CI_MULTISRC: "true"
-          CI_CHUNK_NUM: ${{ matrix.chunk }}
           ALIAS: ${{ secrets.ALIAS }}
           KEY_STORE_PASSWORD: ${{ secrets.KEY_STORE_PASSWORD }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
-        with:
-          arguments: assembleRelease
+        run: |
+          ./gradlew $(echo '${{ toJson(matrix.chunk.modules) }}' | jq -r 'join(" ")')
 
-      - name: Upload APKs (chunk ${{ matrix.chunk }})
-        uses: actions/upload-artifact@v4
+      - name: Upload APKs (${{ matrix.chunk.number }})
+        uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4.6.1
         if: "github.repository == 'keiyoushi/extensions-source'"
         with:
-          name: "multisrc-apks-${{ matrix.chunk }}"
+          name: "individual-apks-${{ matrix.chunk.number }}"
           path: "**/*.apk"
           retention-days: 1
 
       - name: Clean up CI files
         run: rm signingkey.jks
 
-  build_individual:
-    name: Build individual modules
-    needs: prepare
-    runs-on: ubuntu-latest
-    strategy:
-      matrix: ${{ fromJSON(needs.prepare.outputs.individualMatrix) }}
-    steps:
-      - name: Checkout main branch
-        uses: actions/checkout@v4
-
-      - name: Set up JDK
-        uses: actions/setup-java@v4
-        with:
-          java-version: 11
-          distribution: adopt
-
-      - name: Prepare signing key
-        run: |
-          echo ${{ secrets.SIGNING_KEY }} | base64 -d > signingkey.jks
-
-      - name: Build extensions (chunk ${{ matrix.chunk }})
-        uses: gradle/gradle-build-action@v2
-        env:
-          CI_MULTISRC: "false"
-          CI_CHUNK_NUM: ${{ matrix.chunk }}
-          ALIAS: ${{ secrets.ALIAS }}
-          KEY_STORE_PASSWORD: ${{ secrets.KEY_STORE_PASSWORD }}
-          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
-        with:
-          arguments: assembleRelease
-
-      - name: Upload APKs (chunk ${{ matrix.chunk }})
-        uses: actions/upload-artifact@v4
-        if: "github.repository == 'keiyoushi/extensions-source'"
-        with:
-          name: "individual-apks-${{ matrix.chunk }}"
-          path: "**/*.apk"
-          retention-days: 1
-
-      - name: Clean up CI files
-        run: rm signingkey.jks
-
-  publish_repo:
-    name: Publish repo
-    needs:
-      - build_multisrc
-      - build_individual
+  publish:
+    name: Publish extension repo
+    needs: [prepare, build]
     if: "github.repository == 'keiyoushi/extensions-source'"
-    runs-on: ubuntu-latest
+    runs-on: 'ubuntu-24.04'
     steps:
       - name: Download APK artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@cc203385981b70ca67e1cc392babf9cc229d5806 # v4.1.9
         with:
           path: ~/apk-artifacts
 
       - name: Set up JDK
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@3a4f6e1af504cf6a31855fa899c6aa5355ba6c12 # v4.7.0
         with:
           java-version: 17
-          distribution: adopt
+          distribution: temurin
 
       - name: Checkout main branch
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           ref: main
           path: main
@@ -187,21 +123,22 @@ jobs:
       - name: Create repo artifacts
         run: |
           cd main
-          ./.github/scripts/move-apks.sh
-          INSPECTOR_LINK="$(curl -s "https://api.github.com/repos/tachiyomiorg/tachiyomi-extensions-inspector/releases/latest" | jq -r '.assets[0].browser_download_url')"
+          python ./.github/scripts/move-built-apks.py
+          INSPECTOR_LINK="$(curl -s "https://api.github.com/repos/keiyoushi/extensions-inspector/releases/latest" | jq -r '.assets[0].browser_download_url')"
           curl -L "$INSPECTOR_LINK" -o ./Inspector.jar
-          java -jar ./Inspector.jar "apk" "output.json" "tmp"
-          ./.github/scripts/create-repo.sh
+          java -jar ./Inspector.jar "repo/apk" "output.json" "tmp"
+          python ./.github/scripts/create-repo.py
 
       - name: Checkout repo branch
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
-          repository: keiyoushi/tachiyomi-extensions
+          repository: keiyoushi/extensions
           token: ${{ secrets.BOT_PAT }}
           ref: repo
           path: repo
 
-      - name: Deploy repo
+      - name: Merge and deploy repo
         run: |
           cd repo
+          python ../main/.github/scripts/merge-repo.py '${{ needs.prepare.outputs.delete }}'
           ../main/.github/scripts/commit-repo.sh

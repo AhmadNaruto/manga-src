@@ -1,11 +1,7 @@
-apply plugin: 'com.android.application'
-apply plugin: 'kotlin-android'
-
 ext {
     extName = 'Xinmeitulu'
-    pkgNameSuffix = 'all.xinmeitulu'
     extClass = '.Xinmeitulu'
-    extVersionCode = 4
+    extVersionCode = 5
     isNsfw = true
 }
 

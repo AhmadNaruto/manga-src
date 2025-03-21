@@ -108,11 +108,11 @@ class FuryoSquad : ParsedHttpSource() {
         return MangasPage(popularMangaParse(response).mangas.filter { it.title.contains(query, ignoreCase = true) }, false)
     }
 
-    override fun searchMangaSelector() = throw UnsupportedOperationException("Not used")
+    override fun searchMangaSelector() = throw UnsupportedOperationException()
 
-    override fun searchMangaFromElement(element: Element): SManga = throw UnsupportedOperationException("Not used")
+    override fun searchMangaFromElement(element: Element): SManga = throw UnsupportedOperationException()
 
-    override fun searchMangaNextPageSelector() = throw UnsupportedOperationException("Not used")
+    override fun searchMangaNextPageSelector() = throw UnsupportedOperationException()
 
     // Details
 
@@ -192,32 +192,32 @@ class FuryoSquad : ParsedHttpSource() {
         return if (value != null) {
             when (date.split(" ")[4]) {
                 "minute", "minutes" -> Calendar.getInstance().apply {
-                    add(Calendar.MINUTE, value * -1)
+                    add(Calendar.MINUTE, -value)
                     set(Calendar.SECOND, 0)
                     set(Calendar.MILLISECOND, 0)
                 }.timeInMillis
                 "heure", "heures" -> Calendar.getInstance().apply {
-                    add(Calendar.HOUR_OF_DAY, value * -1)
+                    add(Calendar.HOUR_OF_DAY, -value)
                     set(Calendar.SECOND, 0)
                     set(Calendar.MILLISECOND, 0)
                 }.timeInMillis
                 "jour", "jours" -> Calendar.getInstance().apply {
-                    add(Calendar.DATE, value * -1)
+                    add(Calendar.DATE, -value)
                     set(Calendar.SECOND, 0)
                     set(Calendar.MILLISECOND, 0)
                 }.timeInMillis
                 "semaine", "semaines" -> Calendar.getInstance().apply {
-                    add(Calendar.DATE, value * 7 * -1)
+                    add(Calendar.DATE, -value * 7)
                     set(Calendar.SECOND, 0)
                     set(Calendar.MILLISECOND, 0)
                 }.timeInMillis
                 "mois" -> Calendar.getInstance().apply {
-                    add(Calendar.MONTH, value * -1)
+                    add(Calendar.MONTH, -value)
                     set(Calendar.SECOND, 0)
                     set(Calendar.MILLISECOND, 0)
                 }.timeInMillis
                 "an", "ans", "année", "années" -> Calendar.getInstance().apply {
-                    add(Calendar.YEAR, value * -1)
+                    add(Calendar.YEAR, -value)
                     set(Calendar.SECOND, 0)
                     set(Calendar.MILLISECOND, 0)
                 }.timeInMillis
@@ -246,7 +246,7 @@ class FuryoSquad : ParsedHttpSource() {
         return pages
     }
 
-    override fun imageUrlParse(document: Document) = throw UnsupportedOperationException("Not used")
+    override fun imageUrlParse(document: Document) = throw UnsupportedOperationException()
 
     override fun getFilterList() = FilterList()
 }

@@ -3,6 +3,7 @@ package eu.kanade.tachiyomi.extension.en.dynasty
 import android.net.Uri
 import eu.kanade.tachiyomi.network.GET
 import eu.kanade.tachiyomi.network.asObservableSuccess
+import eu.kanade.tachiyomi.network.interceptor.rateLimitHost
 import eu.kanade.tachiyomi.source.model.FilterList
 import eu.kanade.tachiyomi.source.model.MangasPage
 import eu.kanade.tachiyomi.source.model.Page
@@ -14,6 +15,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.Request
 import okhttp3.Response
 import org.jsoup.nodes.Document
@@ -26,10 +28,15 @@ import uy.kohesive.injekt.injectLazy
 import java.text.SimpleDateFormat
 import java.util.ArrayList
 import java.util.Locale
+import java.util.concurrent.TimeUnit
 
 abstract class DynastyScans : ParsedHttpSource() {
 
     override val baseUrl = "https://dynasty-scans.com"
+
+    override val client = network.cloudflareClient.newBuilder()
+        .rateLimitHost(baseUrl.toHttpUrl(), 1, 1, TimeUnit.SECONDS)
+        .build()
 
     abstract fun popularMangaInitialUrl(): String
 
@@ -38,6 +45,8 @@ abstract class DynastyScans : ParsedHttpSource() {
     override val supportsLatest = false
 
     open val searchPrefix = ""
+
+    open val categoryPrefix = ""
 
     private var parent: List<Node> = ArrayList()
 
@@ -49,11 +58,13 @@ abstract class DynastyScans : ParsedHttpSource() {
 
     private val json: Json by injectLazy()
 
+    protected fun popularMangaInitialUrl(page: Int) = "$baseUrl/search?q=&classes%5B%5D=$categoryPrefix&page=$page=$&sort="
+
     override fun popularMangaRequest(page: Int): Request {
-        return GET(popularMangaInitialUrl(), headers)
+        return GET(popularMangaInitialUrl(page), headers)
     }
 
-    override fun popularMangaSelector() = "ul.thumbnails > li.span2"
+    override fun popularMangaSelector() = searchMangaSelector()
 
     override fun popularMangaFromElement(element: Element): SManga {
         val manga = SManga.create()
@@ -62,12 +73,7 @@ abstract class DynastyScans : ParsedHttpSource() {
         return manga
     }
 
-    override fun popularMangaParse(response: Response): MangasPage {
-        val mangas = response.asJsoup().select(popularMangaSelector()).map { element ->
-            popularMangaFromElement(element)
-        }
-        return MangasPage(mangas, false)
-    }
+    override fun popularMangaParse(response: Response) = searchMangaParse(response)
 
     override fun fetchSearchManga(page: Int, query: String, filters: FilterList): Observable<MangasPage> {
         if (query.startsWith("manga:")) {
@@ -249,7 +255,7 @@ abstract class DynastyScans : ParsedHttpSource() {
 
     data class Validate(val _isManga: Boolean, val _pos: Int)
 
-    override fun popularMangaNextPageSelector() = ""
+    override fun popularMangaNextPageSelector() = searchMangaNextPageSelector()
     override fun latestUpdatesSelector() = ""
     override fun latestUpdatesNextPageSelector() = ""
     override fun imageUrlParse(document: Document): String = ""

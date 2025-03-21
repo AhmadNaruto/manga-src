@@ -1,6 +1,5 @@
 package eu.kanade.tachiyomi.extension.en.grrlpower
 
-import android.app.Application
 import android.content.SharedPreferences
 import androidx.preference.PreferenceScreen
 import androidx.preference.SwitchPreferenceCompat
@@ -16,11 +15,10 @@ import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
 import eu.kanade.tachiyomi.source.online.HttpSource
 import eu.kanade.tachiyomi.util.asJsoup
+import keiyoushi.utils.getPreferencesLazy
 import okhttp3.Request
 import okhttp3.Response
 import rx.Observable
-import uy.kohesive.injekt.Injekt
-import uy.kohesive.injekt.api.get
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Locale
@@ -114,16 +112,14 @@ class GrrlPower(
         val text = soup.getElementsByClass("entry").html()
 
         if (text.isNotEmpty() && showAuthorsNotesPref()) {
-            pages.add(Page(1, "", TextInterceptorHelper.createUrl(comicAuthor, text)))
+            pages.add(Page(1, "", TextInterceptorHelper.createUrl("Author's Notes from $comicAuthor", text)))
         }
         return pages
     }
 
     // Show Authors Notes Pref Copied from
     // ProjectRoot/multisrc/overrides/webtoons/webtoons/src/WebtoonsSrc.kt
-    private val preferences: SharedPreferences by lazy {
-        Injekt.get<Application>().getSharedPreferences("source_$id", 0x0000)
-    }
+    private val preferences: SharedPreferences by getPreferencesLazy()
     companion object {
         private const val SHOW_AUTHORS_NOTES_KEY = "showAuthorsNotes"
     }
@@ -147,19 +143,19 @@ class GrrlPower(
     override fun fetchMangaDetails(manga: SManga): Observable<SManga> = Observable.just(manga)
 
     override fun popularMangaRequest(page: Int): Request =
-        throw UnsupportedOperationException("Not Used")
+        throw UnsupportedOperationException()
     override fun searchMangaParse(response: Response): MangasPage =
-        throw UnsupportedOperationException("Not Used")
+        throw UnsupportedOperationException()
     override fun searchMangaRequest(page: Int, query: String, filters: FilterList): Request =
-        throw UnsupportedOperationException("Not Used")
+        throw UnsupportedOperationException()
     override fun imageUrlParse(response: Response): String =
-        throw UnsupportedOperationException("Not Used")
+        throw UnsupportedOperationException()
     override fun latestUpdatesParse(response: Response): MangasPage =
-        throw UnsupportedOperationException("Not Used")
+        throw UnsupportedOperationException()
     override fun latestUpdatesRequest(page: Int): Request =
-        throw UnsupportedOperationException("Not Used")
+        throw UnsupportedOperationException()
     override fun mangaDetailsParse(response: Response): SManga =
-        throw UnsupportedOperationException("Not Used")
+        throw UnsupportedOperationException()
     override fun popularMangaParse(response: Response): MangasPage =
-        throw UnsupportedOperationException("Not Used")
+        throw UnsupportedOperationException()
 }

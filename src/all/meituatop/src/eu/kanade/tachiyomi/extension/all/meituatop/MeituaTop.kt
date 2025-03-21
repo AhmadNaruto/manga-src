@@ -23,7 +23,7 @@ class MeituaTop : HttpSource() {
     override val lang = "all"
     override val supportsLatest = false
 
-    override val baseUrl = "https://meitu1.xyz"
+    override val baseUrl = "https://7a.meitu1.mom"
 
     override fun popularMangaRequest(page: Int) = GET("$baseUrl/arttype/0b-$page.html", headers)
 
@@ -49,9 +49,9 @@ class MeituaTop : HttpSource() {
         return MangasPage(mangas, hasNextPage)
     }
 
-    override fun latestUpdatesRequest(page: Int) = throw UnsupportedOperationException("Not used.")
+    override fun latestUpdatesRequest(page: Int) = throw UnsupportedOperationException()
 
-    override fun latestUpdatesParse(response: Response) = throw UnsupportedOperationException("Not used.")
+    override fun latestUpdatesParse(response: Response) = throw UnsupportedOperationException()
 
     override fun searchMangaRequest(page: Int, query: String, filters: FilterList): Request {
         if (query.isNotEmpty()) {
@@ -70,19 +70,23 @@ class MeituaTop : HttpSource() {
 
     override fun fetchMangaDetails(manga: SManga): Observable<SManga> = Observable.just(manga)
 
-    override fun mangaDetailsParse(response: Response) = throw UnsupportedOperationException("Not used.")
+    override fun mangaDetailsParse(response: Response) = throw UnsupportedOperationException()
 
     override fun fetchChapterList(manga: SManga): Observable<List<SChapter>> {
         val chapter = SChapter.create().apply {
             url = manga.url
             name = "Gallery"
-            date_upload = dateFormat.parse(manga.description!!)!!.time
+            date_upload = parseDate(manga.description!!)
             chapter_number = -2f
         }
         return Observable.just(listOf(chapter))
     }
 
-    override fun chapterListParse(response: Response) = throw UnsupportedOperationException("Not used.")
+    private fun parseDate(date: String): Long = runCatching {
+        dateFormat.parse(date)?.time
+    }.getOrNull() ?: 0L
+
+    override fun chapterListParse(response: Response) = throw UnsupportedOperationException()
 
     override fun pageListParse(response: Response): List<Page> {
         val document = response.asJsoup()
@@ -91,7 +95,7 @@ class MeituaTop : HttpSource() {
         return images.mapIndexed { index, imageUrl -> Page(index, imageUrl = imageUrl) }
     }
 
-    override fun imageUrlParse(response: Response) = throw UnsupportedOperationException("Not used.")
+    override fun imageUrlParse(response: Response) = throw UnsupportedOperationException()
 
     override fun getFilterList() = FilterList(
         Filter.Header("Category (ignored for text search)"),

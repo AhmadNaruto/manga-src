@@ -1,11 +1,7 @@
-apply plugin: 'com.android.application'
-apply plugin: 'kotlin-android'
-
 ext {
     extName = 'E-Hentai'
-    pkgNameSuffix = 'all.ehentai'
     extClass = '.EHFactory'
-    extVersionCode = 20
+    extVersionCode = 25
     isNsfw = true
 }
 

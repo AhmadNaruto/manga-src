@@ -1,12 +1,11 @@
-apply plugin: 'com.android.application'
-apply plugin: 'kotlin-android'
-apply plugin: 'kotlinx-serialization'
-
 ext {
     extName = 'Yugen Mangás'
-    pkgNameSuffix = 'pt.yugenmangas'
     extClass = '.YugenMangas'
-    extVersionCode = 38
+    extVersionCode = 43
 }
 
 apply from: "$rootDir/common.gradle"
+
+dependencies {
+    implementation project(':lib:randomua')
+}

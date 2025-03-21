@@ -1,11 +1,8 @@
-apply plugin: 'com.android.application'
-apply plugin: 'kotlin-android'
-
 ext {
     extName = 'VCPVMP'
-    pkgNameSuffix = "es.vcpvmp"
     extClass = '.VCPVMPFactory'
-    extVersionCode = 9
+    themePkg = 'vercomics'
+    overrideVersionCode = 9
     isNsfw = true
 }
 

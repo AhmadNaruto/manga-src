@@ -1,6 +1,5 @@
 package eu.kanade.tachiyomi.extension.en.questionablecontent
 
-import android.app.Application
 import android.content.SharedPreferences
 import androidx.preference.PreferenceScreen
 import androidx.preference.SwitchPreferenceCompat
@@ -13,14 +12,13 @@ import eu.kanade.tachiyomi.source.model.Page
 import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
 import eu.kanade.tachiyomi.source.online.ParsedHttpSource
+import keiyoushi.utils.getPreferencesLazy
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
 import rx.Observable
-import uy.kohesive.injekt.Injekt
-import uy.kohesive.injekt.api.get
 import java.util.Date
 
 class QuestionableContent : ParsedHttpSource(), ConfigurableSource {
@@ -52,9 +50,7 @@ class QuestionableContent : ParsedHttpSource(), ConfigurableSource {
 
     override fun fetchMangaDetails(manga: SManga) = fetchPopularManga(1).map { it.mangas.first() }
 
-    private val preferences: SharedPreferences by lazy {
-        Injekt.get<Application>().getSharedPreferences("source_$id", 0x0000)
-    }
+    private val preferences: SharedPreferences by getPreferencesLazy()
 
     override fun chapterListParse(response: Response): List<SChapter> {
         val chapters = super.chapterListParse(response).distinct()
@@ -91,7 +87,7 @@ class QuestionableContent : ParsedHttpSource(), ConfigurableSource {
         if (showAuthorsNotesPref()) {
             val str = document.selectFirst("#newspost")?.html()
             if (!str.isNullOrEmpty()) {
-                pages.add(Page(pages.size, "", TextInterceptorHelper.createUrl(AUTHOR, str)))
+                pages.add(Page(pages.size, "", TextInterceptorHelper.createUrl("Author's Notes from $AUTHOR", str)))
             }
         }
         return pages
@@ -116,31 +112,31 @@ class QuestionableContent : ParsedHttpSource(), ConfigurableSource {
         screen.addPreference(authorsNotesPref)
     }
 
-    override fun imageUrlParse(document: Document) = throw Exception("Not used")
+    override fun imageUrlParse(document: Document) = throw UnsupportedOperationException()
 
-    override fun popularMangaSelector(): String = throw Exception("Not used")
+    override fun popularMangaSelector(): String = throw UnsupportedOperationException()
 
-    override fun searchMangaFromElement(element: Element): SManga = throw Exception("Not used")
+    override fun searchMangaFromElement(element: Element): SManga = throw UnsupportedOperationException()
 
-    override fun searchMangaNextPageSelector(): String? = throw Exception("Not used")
+    override fun searchMangaNextPageSelector(): String? = throw UnsupportedOperationException()
 
-    override fun searchMangaSelector(): String = throw Exception("Not used")
+    override fun searchMangaSelector(): String = throw UnsupportedOperationException()
 
-    override fun popularMangaRequest(page: Int): Request = throw Exception("Not used")
+    override fun popularMangaRequest(page: Int): Request = throw UnsupportedOperationException()
 
-    override fun searchMangaRequest(page: Int, query: String, filters: FilterList): Request = throw Exception("Not used")
+    override fun searchMangaRequest(page: Int, query: String, filters: FilterList): Request = throw UnsupportedOperationException()
 
-    override fun popularMangaNextPageSelector(): String? = throw Exception("Not used")
+    override fun popularMangaNextPageSelector(): String? = throw UnsupportedOperationException()
 
-    override fun popularMangaFromElement(element: Element): SManga = throw Exception("Not used")
+    override fun popularMangaFromElement(element: Element): SManga = throw UnsupportedOperationException()
 
-    override fun mangaDetailsParse(document: Document): SManga = throw Exception("Not used")
+    override fun mangaDetailsParse(document: Document): SManga = throw UnsupportedOperationException()
 
-    override fun latestUpdatesNextPageSelector(): String? = throw Exception("Not used")
+    override fun latestUpdatesNextPageSelector(): String? = throw UnsupportedOperationException()
 
-    override fun latestUpdatesFromElement(element: Element): SManga = throw Exception("Not used")
+    override fun latestUpdatesFromElement(element: Element): SManga = throw UnsupportedOperationException()
 
-    override fun latestUpdatesRequest(page: Int): Request = throw Exception("Not used")
+    override fun latestUpdatesRequest(page: Int): Request = throw UnsupportedOperationException()
 
-    override fun latestUpdatesSelector(): String = throw Exception("Not used")
+    override fun latestUpdatesSelector(): String = throw UnsupportedOperationException()
 }

@@ -1,0 +1,10 @@
+ext {
+    extName = 'Traducciones Amistosas'
+    extClass = '.Nartag'
+    themePkg = 'madara'
+    baseUrl = 'https://traduccionesamistosas.cookni.net'
+    overrideVersionCode = 2
+    isNsfw = true
+}
+
+apply from: "$rootDir/common.gradle"

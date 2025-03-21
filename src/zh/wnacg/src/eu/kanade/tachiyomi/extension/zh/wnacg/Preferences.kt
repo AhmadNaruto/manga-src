@@ -1,18 +1,15 @@
 package eu.kanade.tachiyomi.extension.zh.wnacg
 
-import android.app.Application
 import android.content.Context
 import android.content.SharedPreferences
 import androidx.preference.ListPreference
 import eu.kanade.tachiyomi.network.GET
 import okhttp3.Interceptor
 import okhttp3.Response
-import uy.kohesive.injekt.Injekt
-import uy.kohesive.injekt.api.get
 import java.io.IOException
 import kotlin.random.Random
 
-private const val DEFAULT_LIST = "https://www.htmanga9.top,https://www.htmanga7.top,https://www.htmanga6.top,https://www.htmanga3.top,https://www.htmanga4.top,https://www.htmanga5.top"
+private const val DEFAULT_LIST = "https://www.wn01.uk,https://www.wn05.cc,https://www.wn04.cc,https://www.wn03.cc"
 
 fun getPreferencesInternal(
     context: Context,
@@ -40,17 +37,16 @@ val SharedPreferences.baseUrl: String
 val SharedPreferences.urlIndex get() = getString(URL_INDEX_PREF, "-1")!!.toInt()
 val SharedPreferences.urlList get() = getString(URL_LIST_PREF, DEFAULT_LIST)!!.split(",")
 
-fun getCiBaseUrl() = DEFAULT_LIST.replace(",", ", ")
+fun getCiBaseUrl() = DEFAULT_LIST.replace(",", "#, ")
 
-fun getSharedPreferences(id: Long): SharedPreferences {
-    val preferences: SharedPreferences = Injekt.get<Application>().getSharedPreferences("source_$id", 0x0000)
-    if (preferences.getString(DEFAULT_LIST_PREF, "")!! == DEFAULT_LIST) return preferences
-    preferences.edit()
-        .remove("overrideBaseUrl")
-        .putString(DEFAULT_LIST_PREF, DEFAULT_LIST)
-        .setUrlList(DEFAULT_LIST, preferences.urlIndex)
-        .apply()
-    return preferences
+fun SharedPreferences.preferenceMigration() {
+    if (getString(DEFAULT_LIST_PREF, "")!! != DEFAULT_LIST) {
+        edit()
+            .remove("overrideBaseUrl")
+            .putString(DEFAULT_LIST_PREF, DEFAULT_LIST)
+            .setUrlList(DEFAULT_LIST, urlIndex)
+            .apply()
+    }
 }
 
 fun SharedPreferences.Editor.setUrlList(urlList: String, oldIndex: Int): SharedPreferences.Editor {
@@ -71,7 +67,7 @@ class UpdateUrlInterceptor(private val preferences: SharedPreferences) : Interce
 
         val failedResponse = try {
             val response = chain.proceed(request)
-            if (response.isSuccessful) return response
+            if (response.isSuccessful && response.header("Server") != "Parking/1.0") return response
             response.close()
             Result.success(response)
         } catch (e: Throwable) {

@@ -1,0 +1,10 @@
+ext {
+    extName = 'Norte Rose Scan'
+    extClass = '.NorteRoseScan'
+    themePkg = 'madara'
+    baseUrl = 'https://norterose.xyz'
+    overrideVersionCode = 1
+    isNsfw = true
+}
+
+apply from: "$rootDir/common.gradle"

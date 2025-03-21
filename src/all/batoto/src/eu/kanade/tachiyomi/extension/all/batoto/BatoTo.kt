@@ -5,6 +5,7 @@ import android.content.SharedPreferences
 import androidx.preference.CheckBoxPreference
 import androidx.preference.ListPreference
 import androidx.preference.PreferenceScreen
+import eu.kanade.tachiyomi.extension.BuildConfig
 import eu.kanade.tachiyomi.lib.cryptoaes.CryptoAES
 import eu.kanade.tachiyomi.lib.cryptoaes.Deobfuscator
 import eu.kanade.tachiyomi.network.GET
@@ -19,6 +20,7 @@ import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
 import eu.kanade.tachiyomi.source.online.ParsedHttpSource
 import eu.kanade.tachiyomi.util.asJsoup
+import keiyoushi.utils.getPreferencesLazy
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -27,8 +29,6 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.FormBody
 import okhttp3.HttpUrl.Companion.toHttpUrl
-import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
-import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
 import org.jsoup.Jsoup
@@ -39,22 +39,20 @@ import rx.Observable
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
 import uy.kohesive.injekt.injectLazy
+import java.text.ParseException
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Locale
-import java.util.concurrent.TimeUnit
 
 open class BatoTo(
     final override val lang: String,
     private val siteLang: String,
 ) : ConfigurableSource, ParsedHttpSource() {
 
-    private val preferences: SharedPreferences by lazy {
-        Injekt.get<Application>().getSharedPreferences("source_$id", 0x0000)
-    }
+    private val preferences by getPreferencesLazy { migrateMirrorPref() }
 
     override val name: String = "Bato.to"
-    override val baseUrl: String = getMirrorPref()!!
+    override val baseUrl: String get() = mirror
     override val id: Long = when (lang) {
         "zh-Hans" -> 2818874445640189582
         "zh-Hant" -> 38886079663327225
@@ -70,12 +68,9 @@ open class BatoTo(
             entryValues = MIRROR_PREF_ENTRY_VALUES
             setDefaultValue(MIRROR_PREF_DEFAULT_VALUE)
             summary = "%s"
-
             setOnPreferenceChangeListener { _, newValue ->
-                val selected = newValue as String
-                val index = findIndexOfValue(selected)
-                val entry = entryValues[index] as String
-                preferences.edit().putString("${MIRROR_PREF_KEY}_$lang", entry).commit()
+                mirror = newValue as String
+                true
             }
         }
         val altChapterListPref = CheckBoxPreference(screen.context).apply {
@@ -83,34 +78,71 @@ open class BatoTo(
             title = ALT_CHAPTER_LIST_PREF_TITLE
             summary = ALT_CHAPTER_LIST_PREF_SUMMARY
             setDefaultValue(ALT_CHAPTER_LIST_PREF_DEFAULT_VALUE)
-
-            setOnPreferenceChangeListener { _, newValue ->
-                val checkValue = newValue as Boolean
-                preferences.edit().putBoolean("${ALT_CHAPTER_LIST_PREF_KEY}_$lang", checkValue).commit()
-            }
+        }
+        val removeOfficialPref = CheckBoxPreference(screen.context).apply {
+            key = "${REMOVE_TITLE_VERSION_PREF}_$lang"
+            title = "Remove version information from entry titles"
+            summary = "This removes version tags like '(Official)' or '(Yaoi)' from entry titles " +
+                "and helps identify duplicate entries in your library. " +
+                "To update existing entries, remove them from your library (unfavorite) and refresh manually. " +
+                "You might also want to clear the database in advanced settings."
+            setDefaultValue(false)
         }
         screen.addPreference(mirrorPref)
         screen.addPreference(altChapterListPref)
+        screen.addPreference(removeOfficialPref)
     }
 
-    private fun getMirrorPref(): String? = preferences.getString("${MIRROR_PREF_KEY}_$lang", MIRROR_PREF_DEFAULT_VALUE)
+    private var mirror = ""
+        get() {
+            val current = field
+            if (current.isNotEmpty()) {
+                return current
+            }
+            field = getMirrorPref()
+            return field
+        }
+
+    private fun getMirrorPref(): String {
+        return preferences.getString("${MIRROR_PREF_KEY}_$lang", MIRROR_PREF_DEFAULT_VALUE)
+            ?.takeUnless { it == MIRROR_PREF_DEFAULT_VALUE }
+            ?: let {
+                val seed = runCatching {
+                    val pm = Injekt.get<Application>().packageManager
+                    pm.getPackageInfo(BuildConfig.APPLICATION_ID, 0).lastUpdateTime
+                }.getOrElse {
+                    BuildConfig.VERSION_NAME.hashCode().toLong()
+                }
+
+                MIRROR_PREF_ENTRY_VALUES[1 + (seed % (MIRROR_PREF_ENTRIES.size - 1)).toInt()]
+            }
+    }
+
     private fun getAltChapterListPref(): Boolean = preferences.getBoolean("${ALT_CHAPTER_LIST_PREF_KEY}_$lang", ALT_CHAPTER_LIST_PREF_DEFAULT_VALUE)
+    private fun isRemoveTitleVersion(): Boolean {
+        return preferences.getBoolean("${REMOVE_TITLE_VERSION_PREF}_$lang", false)
+    }
+
+    private fun SharedPreferences.migrateMirrorPref() {
+        val selectedMirror = getString("${MIRROR_PREF_KEY}_$lang", MIRROR_PREF_DEFAULT_VALUE)!!
+
+        if (selectedMirror in DEPRECATED_MIRRORS) {
+            edit().putString("${MIRROR_PREF_KEY}_$lang", MIRROR_PREF_DEFAULT_VALUE).commit()
+        }
+    }
 
     override val supportsLatest = true
     private val json: Json by injectLazy()
-    override val client: OkHttpClient = network.cloudflareClient.newBuilder()
-        .connectTimeout(10, TimeUnit.SECONDS)
-        .readTimeout(30, TimeUnit.SECONDS)
-        .build()
+    override val client = network.cloudflareClient
 
     override fun latestUpdatesRequest(page: Int): Request {
-        return GET("$baseUrl/browse?langs=$siteLang&sort=update&page=$page")
+        return GET("$baseUrl/browse?langs=$siteLang&sort=update&page=$page", headers)
     }
 
     override fun latestUpdatesSelector(): String {
         return when (siteLang) {
             "" -> "div#series-list div.col"
-            "en" -> "div#series-list div.col.no-flag"
+            "en,en_us" -> "div#series-list div.col.no-flag"
             else -> "div#series-list div.col:has([data-lang=\"$siteLang\"])"
         }
     }
@@ -128,7 +160,7 @@ open class BatoTo(
     override fun latestUpdatesNextPageSelector() = "div#mainer nav.d-none .pagination .page-item:last-of-type:not(.disabled)"
 
     override fun popularMangaRequest(page: Int): Request {
-        return GET("$baseUrl/browse?langs=$siteLang&sort=views_a&page=$page")
+        return GET("$baseUrl/browse?langs=$siteLang&sort=views_a&page=$page", headers)
     }
 
     override fun popularMangaSelector() = latestUpdatesSelector()
@@ -160,13 +192,13 @@ open class BatoTo(
                         else -> { /* Do Nothing */ }
                     }
                 }
-                client.newCall(GET(url.build().toString(), headers)).asObservableSuccess()
+                client.newCall(GET(url.build(), headers)).asObservableSuccess()
                     .map { response ->
                         queryParse(response)
                     }
             }
             else -> {
-                val url = "$baseUrl/browse".toHttpUrlOrNull()!!.newBuilder()
+                val url = "$baseUrl/browse".toHttpUrl().newBuilder()
                 var min = ""
                 var max = ""
                 filters.forEach { filter ->
@@ -232,7 +264,7 @@ open class BatoTo(
                     url.addQueryParameter("chapters", "$min-$max")
                 }
 
-                client.newCall(GET(url.build().toString(), headers)).asObservableSuccess()
+                client.newCall(GET(url.build(), headers)).asObservableSuccess()
                     .map { response ->
                         queryParse(response)
                     }
@@ -299,73 +331,94 @@ open class BatoTo(
         add("prevPos", "null")
     }
 
-    override fun searchMangaRequest(page: Int, query: String, filters: FilterList): Request = throw UnsupportedOperationException("Not used")
-    override fun searchMangaSelector() = throw UnsupportedOperationException("Not used")
-    override fun searchMangaFromElement(element: Element) = throw UnsupportedOperationException("Not used")
-    override fun searchMangaNextPageSelector() = throw UnsupportedOperationException("Not used")
+    override fun searchMangaRequest(page: Int, query: String, filters: FilterList): Request = throw UnsupportedOperationException()
+    override fun searchMangaSelector() = throw UnsupportedOperationException()
+    override fun searchMangaFromElement(element: Element) = throw UnsupportedOperationException()
+    override fun searchMangaNextPageSelector() = throw UnsupportedOperationException()
 
     override fun mangaDetailsRequest(manga: SManga): Request {
         if (manga.url.startsWith("http")) {
+            // Check if trying to use a deprecated mirror, force current mirror
+            val httpUrl = manga.url.toHttpUrl()
+            if ("https://${httpUrl.host}" in DEPRECATED_MIRRORS) {
+                val newHttpUrl = httpUrl.newBuilder().host(getMirrorPref().toHttpUrl().host)
+                return GET(newHttpUrl.build(), headers)
+            }
             return GET(manga.url, headers)
         }
         return super.mangaDetailsRequest(manga)
     }
+    private var titleRegex: Regex =
+        Regex("\\([^()]*\\)|\\{[^{}]*\\}|\\[(?:(?!]).)*]|«[^»]*»|〘[^〙]*〙|「[^」]*」|『[^』]*』|≪[^≫]*≫|﹛[^﹜]*﹜|〖[^〖〗]*〗|𖤍.+?𖤍|《[^》]*》|⌜.+?⌝|⟨[^⟩]*⟩|\\/Official|\\/ Official", RegexOption.IGNORE_CASE)
 
     override fun mangaDetailsParse(document: Document): SManga {
-        val infoElement = document.select("div#mainer div.container-fluid")
+        val infoElement = document.selectFirst("div#mainer div.container-fluid")!!
         val manga = SManga.create()
-        val workStatus = infoElement.select("div.attr-item:contains(original work) span").text()
-        val uploadStatus = infoElement.select("div.attr-item:contains(upload status) span").text()
-        manga.title = infoElement.select("h3").text().removeEntities()
+        val workStatus = infoElement.selectFirst("div.attr-item:contains(original work) span")?.text()
+        val uploadStatus = infoElement.selectFirst("div.attr-item:contains(upload status) span")?.text()
+        val originalTitle = infoElement.select("h3").text().removeEntities()
+        val description = buildString {
+            append(infoElement.select("div.limit-html").text())
+            infoElement.selectFirst(".episode-list > .alert-warning")?.also {
+                append("\n\n${it.text()}")
+            }
+            infoElement.selectFirst("h5:containsOwn(Extra Info:) + div")?.also {
+                append("\n\nExtra Info:\n${it.wholeText()}")
+            }
+            document.selectFirst("div.pb-2.alias-set.line-b-f")?.takeIf { it.hasText() }?.also {
+                append("\n\nAlternative Titles:\n")
+                append(it.text().split('/').joinToString("\n") { "• ${it.trim()}" })
+            }
+        }.trim()
+
+        val cleanedTitle = if (isRemoveTitleVersion()) {
+            originalTitle.replace(titleRegex, "").trim()
+        } else {
+            originalTitle
+        }
+
+        manga.title = cleanedTitle
         manga.author = infoElement.select("div.attr-item:contains(author) span").text()
         manga.artist = infoElement.select("div.attr-item:contains(artist) span").text()
         manga.status = parseStatus(workStatus, uploadStatus)
         manga.genre = infoElement.select(".attr-item b:contains(genres) + span ").joinToString { it.text() }
-        manga.description = infoElement.select("div.limit-html").text() + "\n" + infoElement.select(".episode-list > .alert-warning").text().trim()
-        manga.thumbnail_url = document.select("div.attr-cover img")
-            .attr("abs:src")
+        manga.description = description
+        manga.thumbnail_url = document.select("div.attr-cover img").attr("abs:src")
         return manga
     }
-
-    private fun parseStatus(workStatus: String?, uploadStatus: String?) = when {
-        workStatus == null -> SManga.UNKNOWN
-        workStatus.contains("Ongoing") -> SManga.ONGOING
-        workStatus.contains("Cancelled") -> SManga.CANCELLED
-        workStatus.contains("Hiatus") -> SManga.ON_HIATUS
-        workStatus.contains("Completed") -> when {
-            uploadStatus?.contains("Ongoing") == true -> SManga.PUBLISHING_FINISHED
-            else -> SManga.COMPLETED
+    private fun parseStatus(workStatus: String?, uploadStatus: String?): Int {
+        val status = workStatus ?: uploadStatus
+        return when {
+            status == null -> SManga.UNKNOWN
+            status.contains("Ongoing") -> SManga.ONGOING
+            status.contains("Cancelled") -> SManga.CANCELLED
+            status.contains("Hiatus") -> SManga.ON_HIATUS
+            status.contains("Completed") -> when {
+                uploadStatus?.contains("Ongoing") == true -> SManga.PUBLISHING_FINISHED
+                else -> SManga.COMPLETED
+            }
+            else -> SManga.UNKNOWN
         }
-        else -> SManga.UNKNOWN
     }
 
-    override fun fetchChapterList(manga: SManga): Observable<List<SChapter>> {
-        val url = client.newCall(
-            GET(
-                when {
-                    manga.url.startsWith("http") -> manga.url
-                    else -> "$baseUrl${manga.url}"
-                },
-            ),
-        ).execute().asJsoup()
-        if (getAltChapterListPref() || checkChapterLists(url)) {
-            val id = manga.url.substringBeforeLast("/").substringAfterLast("/").trim()
-            return client.newCall(GET("$baseUrl/rss/series/$id.xml"))
-                .asObservableSuccess()
-                .map { altChapterParse(it, manga.title) }
-        }
-        return super.fetchChapterList(manga)
-    }
-
-    private fun altChapterParse(response: Response, title: String): List<SChapter> {
+    private fun altChapterParse(response: Response): List<SChapter> {
         return Jsoup.parse(response.body.string(), response.request.url.toString(), Parser.xmlParser())
             .select("channel > item").map { item ->
                 SChapter.create().apply {
                     url = item.selectFirst("guid")!!.text()
-                    name = item.selectFirst("title")!!.text().substringAfter(title).trim()
-                    date_upload = SimpleDateFormat("E, dd MMM yyyy H:m:s Z", Locale.US).parse(item.selectFirst("pubDate")!!.text())?.time ?: 0L
+                    name = item.selectFirst("title")!!.text()
+                    date_upload = parseAltChapterDate(item.selectFirst("pubDate")!!.text())
                 }
             }
+    }
+
+    private val altDateFormat = SimpleDateFormat("E, dd MMM yyyy H:m:s Z", Locale.US)
+    private fun parseAltChapterDate(date: String): Long {
+        return try {
+            altDateFormat.parse(date)!!.time
+        } catch (_: ParseException) {
+            0L
+        }
     }
 
     private fun checkChapterLists(document: Document): Boolean {
@@ -373,10 +426,36 @@ open class BatoTo(
     }
 
     override fun chapterListRequest(manga: SManga): Request {
-        if (manga.url.startsWith("http")) {
-            return GET(manga.url, headers)
+        return if (getAltChapterListPref()) {
+            val id = manga.url.substringBeforeLast("/").substringAfterLast("/").trim()
+
+            GET("$baseUrl/rss/series/$id.xml", headers)
+        } else if (manga.url.startsWith("http")) {
+            // Check if trying to use a deprecated mirror, force current mirror
+            val httpUrl = manga.url.toHttpUrl()
+            if ("https://${httpUrl.host}" in DEPRECATED_MIRRORS) {
+                val newHttpUrl = httpUrl.newBuilder().host(getMirrorPref().toHttpUrl().host)
+                return GET(newHttpUrl.build(), headers)
+            }
+            GET(manga.url, headers)
+        } else {
+            super.chapterListRequest(manga)
         }
-        return super.chapterListRequest(manga)
+    }
+
+    override fun chapterListParse(response: Response): List<SChapter> {
+        if (getAltChapterListPref()) {
+            return altChapterParse(response)
+        }
+
+        val document = response.asJsoup()
+
+        if (checkChapterLists(document)) {
+            throw Exception("Deleted from site")
+        }
+
+        return document.select(chapterListSelector())
+            .map(::chapterFromElement)
     }
 
     override fun chapterListSelector() = "div.main div.p-2"
@@ -385,11 +464,14 @@ open class BatoTo(
         val chapter = SChapter.create()
         val urlElement = element.select("a.chapt")
         val group = element.select("div.extra > a:not(.ps-3)").text()
+        val user = element.select("div.extra > a.ps-3").text()
         val time = element.select("div.extra > i.ps-3").text()
         chapter.setUrlWithoutDomain(urlElement.attr("href"))
         chapter.name = urlElement.text()
-        if (group != "") {
-            chapter.scanlator = group
+        chapter.scanlator = when {
+            group.isNotBlank() -> group
+            user.isNotBlank() -> user
+            else -> "Unknown"
         }
         if (time != "") {
             chapter.date_upload = parseChapterDate(time)
@@ -402,46 +484,46 @@ open class BatoTo(
 
         return when {
             "secs" in date -> Calendar.getInstance().apply {
-                add(Calendar.SECOND, value * -1)
+                add(Calendar.SECOND, -value)
             }.timeInMillis
             "mins" in date -> Calendar.getInstance().apply {
-                add(Calendar.MINUTE, value * -1)
+                add(Calendar.MINUTE, -value)
             }.timeInMillis
             "hours" in date -> Calendar.getInstance().apply {
-                add(Calendar.HOUR_OF_DAY, value * -1)
+                add(Calendar.HOUR_OF_DAY, -value)
             }.timeInMillis
             "days" in date -> Calendar.getInstance().apply {
-                add(Calendar.DATE, value * -1)
+                add(Calendar.DATE, -value)
             }.timeInMillis
             "weeks" in date -> Calendar.getInstance().apply {
-                add(Calendar.DATE, value * 7 * -1)
+                add(Calendar.DATE, -value * 7)
             }.timeInMillis
             "months" in date -> Calendar.getInstance().apply {
-                add(Calendar.MONTH, value * -1)
+                add(Calendar.MONTH, -value)
             }.timeInMillis
             "years" in date -> Calendar.getInstance().apply {
-                add(Calendar.YEAR, value * -1)
+                add(Calendar.YEAR, -value)
             }.timeInMillis
             "sec" in date -> Calendar.getInstance().apply {
-                add(Calendar.SECOND, value * -1)
+                add(Calendar.SECOND, -value)
             }.timeInMillis
             "min" in date -> Calendar.getInstance().apply {
-                add(Calendar.MINUTE, value * -1)
+                add(Calendar.MINUTE, -value)
             }.timeInMillis
             "hour" in date -> Calendar.getInstance().apply {
-                add(Calendar.HOUR_OF_DAY, value * -1)
+                add(Calendar.HOUR_OF_DAY, -value)
             }.timeInMillis
             "day" in date -> Calendar.getInstance().apply {
-                add(Calendar.DATE, value * -1)
+                add(Calendar.DATE, -value)
             }.timeInMillis
             "week" in date -> Calendar.getInstance().apply {
-                add(Calendar.DATE, value * 7 * -1)
+                add(Calendar.DATE, -value * 7)
             }.timeInMillis
             "month" in date -> Calendar.getInstance().apply {
-                add(Calendar.MONTH, value * -1)
+                add(Calendar.MONTH, -value)
             }.timeInMillis
             "year" in date -> Calendar.getInstance().apply {
-                add(Calendar.YEAR, value * -1)
+                add(Calendar.YEAR, -value)
             }.timeInMillis
             else -> {
                 return 0
@@ -451,6 +533,12 @@ open class BatoTo(
 
     override fun pageListRequest(chapter: SChapter): Request {
         if (chapter.url.startsWith("http")) {
+            // Check if trying to use a deprecated mirror, force current mirror
+            val httpUrl = chapter.url.toHttpUrl()
+            if ("https://${httpUrl.host}" in DEPRECATED_MIRRORS) {
+                val newHttpUrl = httpUrl.newBuilder().host(getMirrorPref().toHttpUrl().host)
+                return GET(newHttpUrl.build(), headers)
+            }
             return GET(chapter.url, headers)
         }
         return super.pageListRequest(chapter)
@@ -460,8 +548,8 @@ open class BatoTo(
         val script = document.selectFirst("script:containsData(imgHttps):containsData(batoWord):containsData(batoPass)")?.html()
             ?: throw RuntimeException("Couldn't find script with image data.")
 
-        val imgHttpLisString = script.substringAfter("const imgHttps =").substringBefore(";").trim()
-        val imgHttpLis = json.parseToJsonElement(imgHttpLisString).jsonArray.map { it.jsonPrimitive.content }
+        val imgHttpsString = script.substringAfter("const imgHttps =").substringBefore(";").trim()
+        val imageUrls = json.parseToJsonElement(imgHttpsString).jsonArray.map { it.jsonPrimitive.content }
         val batoWord = script.substringAfter("const batoWord =").substringBefore(";").trim()
         val batoPass = script.substringAfter("const batoPass =").substringBefore(";").trim()
 
@@ -469,12 +557,19 @@ open class BatoTo(
         val imgAccListString = CryptoAES.decrypt(batoWord.removeSurrounding("\""), evaluatedPass)
         val imgAccList = json.parseToJsonElement(imgAccListString).jsonArray.map { it.jsonPrimitive.content }
 
-        return imgHttpLis.zip(imgAccList).mapIndexed { i, (imgUrl, imgAcc) ->
-            Page(i, imageUrl = "$imgUrl?$imgAcc")
+        return imageUrls.mapIndexed { i, it ->
+            val acc = imgAccList.getOrNull(i)
+            val url = if (acc != null) {
+                "$it?$acc"
+            } else {
+                it
+            }
+
+            Page(i, imageUrl = url)
         }
     }
 
-    override fun imageUrlParse(document: Document): String = throw UnsupportedOperationException("Not used")
+    override fun imageUrlParse(document: Document): String = throw UnsupportedOperationException()
 
     private fun String.removeEntities(): String = Parser.unescapeEntities(this, true)
 
@@ -936,8 +1031,9 @@ open class BatoTo(
     companion object {
         private const val MIRROR_PREF_KEY = "MIRROR"
         private const val MIRROR_PREF_TITLE = "Mirror"
+        private const val REMOVE_TITLE_VERSION_PREF = "REMOVE_TITLE_VERSION"
         private val MIRROR_PREF_ENTRIES = arrayOf(
-            "bato.to",
+            "Auto",
             "batocomic.com",
             "batocomic.net",
             "batocomic.org",
@@ -946,25 +1042,32 @@ open class BatoTo(
             "battwo.com",
             "comiko.net",
             "comiko.org",
-            "mangatoto.com",
-            "mangatoto.net",
-            "mangatoto.org",
             "readtoto.com",
             "readtoto.net",
             "readtoto.org",
-            "dto.to",
-            "hto.to",
-            "mto.to",
-            "wto.to",
             "xbato.com",
             "xbato.net",
             "xbato.org",
             "zbato.com",
             "zbato.net",
             "zbato.org",
+            "dto.to",
+            "fto.to",
+            "hto.to",
+            "jto.to",
+            "mto.to",
+            "wto.to",
         )
         private val MIRROR_PREF_ENTRY_VALUES = MIRROR_PREF_ENTRIES.map { "https://$it" }.toTypedArray()
         private val MIRROR_PREF_DEFAULT_VALUE = MIRROR_PREF_ENTRY_VALUES[0]
+
+        private val DEPRECATED_MIRRORS = listOf(
+            "https://bato.to",
+            "https://batocc.com", // parked
+            "https://mangatoto.com",
+            "https://mangatoto.net",
+            "https://mangatoto.org",
+        )
 
         private const val ALT_CHAPTER_LIST_PREF_KEY = "ALT_CHAPTER_LIST"
         private const val ALT_CHAPTER_LIST_PREF_TITLE = "Alternative Chapter List"

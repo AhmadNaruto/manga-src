@@ -1,22 +1,17 @@
 package eu.kanade.tachiyomi.extension.es.manhwasnet
 
-import app.cash.quickjs.QuickJs
 import eu.kanade.tachiyomi.network.GET
+import eu.kanade.tachiyomi.network.interceptor.rateLimitHost
 import eu.kanade.tachiyomi.source.model.Filter
 import eu.kanade.tachiyomi.source.model.FilterList
 import eu.kanade.tachiyomi.source.model.Page
 import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
 import eu.kanade.tachiyomi.source.online.ParsedHttpSource
-import eu.kanade.tachiyomi.util.asJsoup
-import okhttp3.Cookie
-import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
-import okhttp3.Interceptor
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.Request
-import okhttp3.Response
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
-import java.io.IOException
 import java.util.Calendar
 import java.util.concurrent.TimeUnit
 
@@ -27,50 +22,17 @@ class ManhwasNet : ParsedHttpSource() {
     override val name: String = "Manhwas.net"
     override val supportsLatest: Boolean = true
 
-    override val client = network.client.newBuilder()
-        .connectTimeout(60, TimeUnit.SECONDS)
-        .writeTimeout(60, TimeUnit.SECONDS)
-        .readTimeout(60, TimeUnit.SECONDS)
-        .addInterceptor { sucuriInterceptor(it) }
+    override val client = network.cloudflareClient.newBuilder()
+        .rateLimitHost(baseUrl.toHttpUrl(), 3, 1, TimeUnit.SECONDS)
         .build()
-
-    private fun sucuriInterceptor(chain: Interceptor.Chain): Response {
-        val request = chain.request()
-        val url = request.url
-        val response = try {
-            chain.proceed(request)
-        } catch (e: Exception) {
-            // Try to clear cookies and retry
-            client.cookieJar.saveFromResponse(url, emptyList())
-            val clearHeaders = request.headers.newBuilder().removeAll("Cookie").build()
-            chain.proceed(request.newBuilder().headers(clearHeaders).build())
-        }
-        if (response.headers["x-sucuri-cache"].isNullOrEmpty() && response.headers["x-sucuri-id"] != null && url.toString().startsWith(baseUrl)) {
-            val script = response.asJsoup().selectFirst("script")?.data()
-            if (script != null) {
-                val a = script.split("(r)")[0].dropLast(1) + "r=r.replace('document.cookie','cookie');"
-                QuickJs.create().use {
-                    val b = it.evaluate(a) as String
-                    val sucuriCookie = it.evaluate(b.replace("location.", "").replace("reload();", "")) as String
-                    val cookieName = sucuriCookie.split("=")[0]
-                    val cookieValue = sucuriCookie.split("=")[1].replace(";path", "")
-                    client.cookieJar.saveFromResponse(url, listOf(Cookie.parse(url, "$cookieName=$cookieValue")!!))
-                }
-                val newResponse = chain.proceed(request)
-                if (!newResponse.headers["x-sucuri-cache"].isNullOrEmpty()) return newResponse
-            }
-            throw IOException("Sitio protegido - Abra en WebView para intentar desbloquear.")
-        }
-        return response
-    }
 
     override fun headersBuilder() = super.headersBuilder()
         .set("Referer", "$baseUrl/")
 
     override fun popularMangaRequest(page: Int): Request {
-        val url = "$baseUrl/biblioteca".toHttpUrlOrNull()!!.newBuilder()
+        val url = "$baseUrl/biblioteca".toHttpUrl().newBuilder()
         url.addQueryParameter("page", page.toString())
-        return GET(url.build().toString(), headers)
+        return GET(url.build(), headers)
     }
 
     override fun popularMangaSelector() = "ul > li > article.anime"
@@ -98,7 +60,7 @@ class ManhwasNet : ParsedHttpSource() {
     }
 
     override fun searchMangaRequest(page: Int, query: String, filters: FilterList): Request {
-        val url = "$baseUrl/biblioteca".toHttpUrlOrNull()!!.newBuilder()
+        val url = "$baseUrl/biblioteca".toHttpUrl().newBuilder()
         if (query.isNotEmpty()) {
             url.addQueryParameter("buscar", query)
         } else {
@@ -116,7 +78,7 @@ class ManhwasNet : ParsedHttpSource() {
             }
         }
         url.addQueryParameter("page", page.toString())
-        return GET(url.build().toString(), headers)
+        return GET(url.build(), headers)
     }
 
     override fun searchMangaSelector() = popularMangaSelector()
@@ -151,7 +113,7 @@ class ManhwasNet : ParsedHttpSource() {
         }
     }
 
-    override fun imageUrlParse(document: Document) = throw UnsupportedOperationException("Not used.")
+    override fun imageUrlParse(document: Document) = throw UnsupportedOperationException()
 
     override fun getFilterList() = FilterList(
         Filter.Header("Los filtros no se pueden combinar:"),

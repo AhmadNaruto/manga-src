@@ -1,5 +1,6 @@
 package eu.kanade.tachiyomi.extension.all.ninemanga
 
+import eu.kanade.tachiyomi.lib.cookieinterceptor.CookieInterceptor
 import eu.kanade.tachiyomi.network.GET
 import eu.kanade.tachiyomi.source.model.Filter
 import eu.kanade.tachiyomi.source.model.FilterList
@@ -8,7 +9,7 @@ import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
 import eu.kanade.tachiyomi.source.online.ParsedHttpSource
 import okhttp3.Headers
-import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.jsoup.nodes.Document
@@ -26,7 +27,9 @@ open class NineManga(
 
     override val supportsLatest: Boolean = true
 
-    override val client: OkHttpClient = network.client.newBuilder()
+    private val cookieInterceptor = CookieInterceptor(baseUrl.substringAfter("://"), "ninemanga_list_num" to "1")
+
+    override val client: OkHttpClient = network.cloudflareClient.newBuilder()
         .addInterceptor { chain ->
             val request = chain.request()
             val url = request.url.toString()
@@ -37,7 +40,9 @@ open class NineManga(
                 return@addInterceptor chain.proceed(newRequest)
             }
             chain.proceed(request)
-        }.build()
+        }
+        .addNetworkInterceptor(cookieInterceptor)
+        .build()
 
     override fun headersBuilder(): Headers.Builder = Headers.Builder()
         .add("Accept-Language", "es-ES,es;q=0.9,en;q=0.8,gl;q=0.7")
@@ -97,7 +102,6 @@ open class NineManga(
         element.select("a.chapter_list_a").let {
             name = it.text().replace(mangaTitleForCleaning, "", true)
             url = it.attr("href").substringAfter(baseUrl).replace("%20", " ")
-                .substringBeforeLast(".html") + "-1-1.html"
         }
         date_upload = parseChapterDate(element.select("span").text())
     }
@@ -137,7 +141,7 @@ open class NineManga(
     override fun imageUrlParse(document: Document) = document.select("div.pic_box img.manga_pic").first()!!.attr("src").orEmpty()
 
     override fun searchMangaRequest(page: Int, query: String, filters: FilterList): Request {
-        val url = "$baseUrl/search/".toHttpUrlOrNull()!!.newBuilder()
+        val url = "$baseUrl/search/".toHttpUrl().newBuilder()
 
         url.addQueryParameter("wd", query)
         url.addQueryParameter("page", page.toString())
@@ -166,7 +170,7 @@ open class NineManga(
 
         url.addQueryParameter("type", "high")
 
-        return GET(url.toString(), headers)
+        return GET(url.build(), headers)
     }
 
     override fun searchMangaSelector() = popularMangaSelector()

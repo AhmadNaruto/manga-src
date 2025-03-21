@@ -1,11 +1,8 @@
-apply plugin: 'com.android.application'
-apply plugin: 'kotlin-android'
-
 ext {
-    extName = 'Baozimh.org'
-    pkgNameSuffix = 'zh.baozimhorg'
-    extClass = '.BaozimhOrg'
-    extVersionCode = 28
+    extName = 'GoDa'
+    extClass = '.GoDaManhua'
+    themePkg = 'goda'
+    overrideVersionCode = 31
 }
 
 apply from: "$rootDir/common.gradle"

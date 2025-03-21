@@ -1,0 +1,10 @@
+ext {
+    extName = 'PhenixScans'
+    extClass = '.PhenixScans'
+    themePkg = 'mangathemesia'
+    baseUrl = 'https://phenixscans.fr'
+    overrideVersionCode = 2
+    isNsfw = false
+}
+
+apply from: "$rootDir/common.gradle"

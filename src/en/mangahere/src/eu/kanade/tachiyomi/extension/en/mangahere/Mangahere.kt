@@ -1,7 +1,9 @@
 package eu.kanade.tachiyomi.extension.en.mangahere
 
 import app.cash.quickjs.QuickJs
+import eu.kanade.tachiyomi.lib.cookieinterceptor.CookieInterceptor
 import eu.kanade.tachiyomi.network.GET
+import eu.kanade.tachiyomi.network.interceptor.rateLimitHost
 import eu.kanade.tachiyomi.source.model.Filter
 import eu.kanade.tachiyomi.source.model.FilterList
 import eu.kanade.tachiyomi.source.model.Page
@@ -9,11 +11,8 @@ import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
 import eu.kanade.tachiyomi.source.online.ParsedHttpSource
 import eu.kanade.tachiyomi.util.asJsoup
-import okhttp3.Cookie
-import okhttp3.CookieJar
 import okhttp3.Headers
-import okhttp3.HttpUrl
-import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.jsoup.nodes.Document
@@ -35,27 +34,22 @@ class Mangahere : ParsedHttpSource() {
 
     override val supportsLatest = true
 
-    override fun headersBuilder(): Headers.Builder = Headers.Builder()
-        .add("Referer", baseUrl)
+    override fun headersBuilder(): Headers.Builder = super.headersBuilder()
+        .set("Referer", "$baseUrl/")
 
-    override val client: OkHttpClient = super.client.newBuilder()
-        .cookieJar(
-            object : CookieJar {
-                override fun saveFromResponse(url: HttpUrl, cookies: List<Cookie>) {}
-                override fun loadForRequest(url: HttpUrl): MutableList<Cookie> {
-                    return ArrayList<Cookie>().apply {
-                        add(
-                            Cookie.Builder()
-                                .domain("www.mangahere.cc")
-                                .path("/")
-                                .name("isAdult")
-                                .value("1")
-                                .build(),
-                        )
-                    }
-                }
-            },
-        )
+    private val cookieInterceptor = CookieInterceptor(
+        baseUrl.substringAfter("://"),
+        listOf(
+            "isAdult" to "1",
+        ),
+    )
+
+    private val notRateLimitClient: OkHttpClient = network.cloudflareClient.newBuilder()
+        .addNetworkInterceptor(cookieInterceptor)
+        .build()
+
+    override val client: OkHttpClient = notRateLimitClient.newBuilder()
+        .rateLimitHost(baseUrl.toHttpUrl(), 1, 2)
         .build()
 
     override fun popularMangaSelector() = ".manga-list-1-list li"
@@ -91,7 +85,7 @@ class Mangahere : ParsedHttpSource() {
     override fun latestUpdatesNextPageSelector() = "div.pager-list-left a:last-child"
 
     override fun searchMangaRequest(page: Int, query: String, filters: FilterList): Request {
-        val url = "$baseUrl/search".toHttpUrlOrNull()!!.newBuilder()
+        val url = "$baseUrl/search".toHttpUrl().newBuilder()
 
         filters.forEach { filter ->
             when (filter) {
@@ -137,7 +131,7 @@ class Mangahere : ParsedHttpSource() {
             addEncodedQueryParameter("name", null)
         }
 
-        return GET(url.toString(), headers)
+        return GET(url.build(), headers)
     }
 
     override fun searchMangaSelector() = ".manga-list-4-list > li"
@@ -277,7 +271,7 @@ class Mangahere : ParsedHttpSource() {
                         .addHeader("X-Requested-With", "XMLHttpRequest")
                         .build()
 
-                    val response = client.newCall(request).execute()
+                    val response = notRateLimitClient.newCall(request).execute()
                     responseText = response.body.string()
 
                     if (responseText.isNotEmpty()) {
@@ -322,7 +316,7 @@ class Mangahere : ParsedHttpSource() {
         return quickJs.evaluate(secretKeyResultScript).toString()
     }
 
-    override fun imageUrlParse(document: Document): String = throw UnsupportedOperationException("Not used")
+    override fun imageUrlParse(document: Document): String = throw UnsupportedOperationException()
 
     private class Genre(title: String, val id: Int) : Filter.TriState(title)
 

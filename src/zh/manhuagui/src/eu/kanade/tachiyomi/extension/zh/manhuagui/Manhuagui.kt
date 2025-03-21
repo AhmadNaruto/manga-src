@@ -1,8 +1,8 @@
 package eu.kanade.tachiyomi.extension.zh.manhuagui
 
-import android.app.Application
 import android.content.SharedPreferences
-import app.cash.quickjs.QuickJs
+import eu.kanade.tachiyomi.lib.lzstring.LZString
+import eu.kanade.tachiyomi.lib.unpacker.Unpacker
 import eu.kanade.tachiyomi.network.GET
 import eu.kanade.tachiyomi.network.POST
 import eu.kanade.tachiyomi.network.asObservableSuccess
@@ -16,6 +16,7 @@ import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
 import eu.kanade.tachiyomi.source.online.ParsedHttpSource
 import eu.kanade.tachiyomi.util.asJsoup
+import keiyoushi.utils.getPreferencesLazy
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.delay
@@ -27,7 +28,7 @@ import okhttp3.Call
 import okhttp3.Callback
 import okhttp3.Headers
 import okhttp3.HttpUrl
-import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.Interceptor
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -36,8 +37,6 @@ import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
 import rx.Observable
-import uy.kohesive.injekt.Injekt
-import uy.kohesive.injekt.api.get
 import uy.kohesive.injekt.injectLazy
 import java.io.IOException
 import java.text.SimpleDateFormat
@@ -48,9 +47,7 @@ class Manhuagui(
     override val lang: String = "zh",
 ) : ConfigurableSource, ParsedHttpSource() {
 
-    private val preferences: SharedPreferences by lazy {
-        Injekt.get<Application>().getSharedPreferences("source_$id", 0x0000)
-    }
+    private val preferences: SharedPreferences by getPreferencesLazy()
 
     private val baseHost = if (preferences.getBoolean(USE_MIRROR_URL_PREF, false)) {
         "mhgui.com"
@@ -69,22 +66,22 @@ class Manhuagui(
     private val imageServer = arrayOf("https://i.hamreus.com", "https://cf.hamreus.com")
     private val mobileWebsiteUrl = "https://m.$baseHost"
     private val json: Json by injectLazy()
-    private val baseHttpUrl: HttpUrl = baseUrl.toHttpUrlOrNull()!!
+    private val baseHttpUrl: HttpUrl = baseUrl.toHttpUrl()
 
     // Add rate limit to fix manga thumbnail load failure
     override val client: OkHttpClient =
         if (getShowR18()) {
             network.client.newBuilder()
                 .rateLimitHost(baseHttpUrl, preferences.getString(MAINSITE_RATELIMIT_PREF, MAINSITE_RATELIMIT_DEFAULT_VALUE)!!.toInt(), 10)
-                .rateLimitHost(imageServer[0].toHttpUrlOrNull()!!, preferences.getString(IMAGE_CDN_RATELIMIT_PREF, IMAGE_CDN_RATELIMIT_DEFAULT_VALUE)!!.toInt())
-                .rateLimitHost(imageServer[1].toHttpUrlOrNull()!!, preferences.getString(IMAGE_CDN_RATELIMIT_PREF, IMAGE_CDN_RATELIMIT_DEFAULT_VALUE)!!.toInt())
+                .rateLimitHost(imageServer[0].toHttpUrl(), preferences.getString(IMAGE_CDN_RATELIMIT_PREF, IMAGE_CDN_RATELIMIT_DEFAULT_VALUE)!!.toInt())
+                .rateLimitHost(imageServer[1].toHttpUrl(), preferences.getString(IMAGE_CDN_RATELIMIT_PREF, IMAGE_CDN_RATELIMIT_DEFAULT_VALUE)!!.toInt())
                 .addNetworkInterceptor(AddCookieHeaderInterceptor(baseHttpUrl.host))
                 .build()
         } else {
             network.client.newBuilder()
                 .rateLimitHost(baseHttpUrl, preferences.getString(MAINSITE_RATELIMIT_PREF, MAINSITE_RATELIMIT_DEFAULT_VALUE)!!.toInt(), 10)
-                .rateLimitHost(imageServer[0].toHttpUrlOrNull()!!, preferences.getString(IMAGE_CDN_RATELIMIT_PREF, IMAGE_CDN_RATELIMIT_DEFAULT_VALUE)!!.toInt())
-                .rateLimitHost(imageServer[1].toHttpUrlOrNull()!!, preferences.getString(IMAGE_CDN_RATELIMIT_PREF, IMAGE_CDN_RATELIMIT_DEFAULT_VALUE)!!.toInt())
+                .rateLimitHost(imageServer[0].toHttpUrl(), preferences.getString(IMAGE_CDN_RATELIMIT_PREF, IMAGE_CDN_RATELIMIT_DEFAULT_VALUE)!!.toInt())
+                .rateLimitHost(imageServer[1].toHttpUrl(), preferences.getString(IMAGE_CDN_RATELIMIT_PREF, IMAGE_CDN_RATELIMIT_DEFAULT_VALUE)!!.toInt())
                 .build()
         }
 
@@ -129,16 +126,28 @@ class Manhuagui(
 
             // Example: https://www.manhuagui.com/list/japan_maoxian_qingnian_2020_b/update_p1.html
             //                                        /$params                      /$sortOrder $page
-            var url = "$baseUrl/list"
-            if (params != "") {
-                url += "/$params"
-            }
-            url += if (sortOrder == "") {
-                "/index_p$page.html"
-            } else {
-                "/${sortOrder}_p$page.html"
+            val url: String = when {
+                sortOrder == "" -> "$baseUrl/list${params.toPathOrEmpty()}/index_p$page.html"
+                sortOrder.startsWith(RANK_PREFIX) -> {
+                    "$baseUrl/rank${params.toPathOrEmpty()}".let {
+                        if (it.endsWith("rank")) {
+                            "$it/${sortOrder.removePrefix(RANK_PREFIX).toPathOrEmpty("",".html")}"
+                        } else {
+                            "$it${sortOrder.removePrefix(RANK_PREFIX).toPathOrEmpty("_")}.html"
+                        }
+                    }
+                }
+                else -> "$baseUrl/list${params.toPathOrEmpty()}/${sortOrder}_p$page.html"
             }
             return GET(url, headers)
+        }
+    }
+
+    private fun String.toPathOrEmpty(prefix: String = "/", suffix: String = ""): String {
+        return if (isEmpty()) {
+            this
+        } else {
+            "$prefix$this$suffix"
         }
     }
 
@@ -220,23 +229,38 @@ class Manhuagui(
 
     override fun searchMangaParse(response: Response): MangasPage {
         val document = response.asJsoup()
-        if (response.request.url.encodedPath.startsWith("/s/")) {
-            // Normal search
-            val mangas = document.select(searchMangaSelector()).map { element ->
-                searchMangaFromElement(element)
-            }
-            val hasNextPage = searchMangaNextPageSelector().let { selector ->
-                document.select(selector).first()
-            } != null
+        return when {
+            response.request.url.encodedPath.startsWith("/s/") -> {
+                // Normal search
+                val mangas = document.select(searchMangaSelector()).map { element ->
+                    searchMangaFromElement(element)
+                }
+                val hasNextPage = searchMangaNextPageSelector().let { selector ->
+                    document.select(selector).first()
+                } != null
 
-            return MangasPage(mangas, hasNextPage)
-        } else {
-            // Filters search
-            val mangas = document.select(popularMangaSelector()).map { element ->
-                popularMangaFromElement(element)
+                MangasPage(mangas, hasNextPage)
             }
-            val hasNextPage = document.select(popularMangaNextPageSelector()).first() != null
-            return MangasPage(mangas, hasNextPage)
+            response.request.url.encodedPath.startsWith("/rank/") -> {
+                MangasPage(
+                    document.select("td.rank-title").map {
+                        SManga.create().apply {
+                            url = it.select("a").attr("href")
+                            title = it.select("a").text()
+                            // The ranking page does not include images.
+                        }
+                    },
+                    false,
+                )
+            }
+            else -> {
+                // Filters search
+                val mangas = document.select(popularMangaSelector()).map { element ->
+                    popularMangaFromElement(element)
+                }
+                val hasNextPage = document.select(popularMangaNextPageSelector()).first() != null
+                MangasPage(mangas, hasNextPage)
+            }
         }
     }
 
@@ -252,6 +276,7 @@ class Manhuagui(
     override fun headersBuilder(): Headers.Builder = super.headersBuilder()
         .set("Referer", baseUrl)
         .set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/84.0.4147.105 Safari/537.36")
+        .set("Accept-Language", "zh-CN,zh;q=0.9,en-US;q=0.8,en;q=0.7")
 
     override fun popularMangaFromElement(element: Element) = mangaFromElement(element)
     override fun latestUpdatesFromElement(element: Element) = mangaFromElement(element)
@@ -284,7 +309,7 @@ class Manhuagui(
         return manga
     }
 
-    override fun chapterFromElement(element: Element) = throw UnsupportedOperationException("Not used.")
+    override fun chapterFromElement(element: Element) = throw UnsupportedOperationException()
     override fun chapterListParse(response: Response): List<SChapter> {
         val document = response.asJsoup()
         val chapters = mutableListOf<SChapter>()
@@ -294,19 +319,13 @@ class Manhuagui(
         if (hiddenEncryptedChapterList != null) {
             if (getShowR18()) {
                 // Hidden chapter list is LZString encoded
-                val decodedHiddenChapterList = QuickJs.create().use {
-                    it.evaluate(
-                        jsDecodeFunc +
-                            """LZString.decompressFromBase64('${hiddenEncryptedChapterList.`val`()}');""",
-                    ) as String
-                }
+                val decodedHiddenChapterList = LZString.decompressFromBase64(hiddenEncryptedChapterList.`val`())
                 val hiddenChapterList = Jsoup.parse(decodedHiddenChapterList, response.request.url.toString())
-                if (hiddenChapterList != null) {
-                    // Replace R18 warning with actual chapter list
-                    document.select("#erroraudit_show").first()!!.replaceWith(hiddenChapterList)
-                    // Remove hidden chapter list element
-                    document.select("#__VIEWSTATE").first()!!.remove()
-                }
+
+                // Replace R18 warning with actual chapter list
+                document.select("#erroraudit_show").first()!!.replaceWith(hiddenChapterList)
+                // Remove hidden chapter list element
+                document.select("#__VIEWSTATE").first()!!.remove()
             } else {
                 // "You need to enable R18 switch and restart Tachiyomi to read this manga"
                 error("您需要打开R18作品显示开关并重启软件才能阅读此作品")
@@ -371,22 +390,20 @@ class Manhuagui(
         return manga
     }
 
-    private val jsDecodeFunc =
-        """
-        var LZString=(function(){var f=String.fromCharCode;var keyStrBase64="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=";var baseReverseDic={};function getBaseValue(alphabet,character){if(!baseReverseDic[alphabet]){baseReverseDic[alphabet]={};for(var i=0;i<alphabet.length;i++){baseReverseDic[alphabet][alphabet.charAt(i)]=i}}return baseReverseDic[alphabet][character]}var LZString={decompressFromBase64:function(input){if(input==null)return"";if(input=="")return null;return LZString._0(input.length,32,function(index){return getBaseValue(keyStrBase64,input.charAt(index))})},_0:function(length,resetValue,getNextValue){var dictionary=[],next,enlargeIn=4,dictSize=4,numBits=3,entry="",result=[],i,w,bits,resb,maxpower,power,c,data={val:getNextValue(0),position:resetValue,index:1};for(i=0;i<3;i+=1){dictionary[i]=i}bits=0;maxpower=Math.pow(2,2);power=1;while(power!=maxpower){resb=data.val&data.position;data.position>>=1;if(data.position==0){data.position=resetValue;data.val=getNextValue(data.index++)}bits|=(resb>0?1:0)*power;power<<=1}switch(next=bits){case 0:bits=0;maxpower=Math.pow(2,8);power=1;while(power!=maxpower){resb=data.val&data.position;data.position>>=1;if(data.position==0){data.position=resetValue;data.val=getNextValue(data.index++)}bits|=(resb>0?1:0)*power;power<<=1}c=f(bits);break;case 1:bits=0;maxpower=Math.pow(2,16);power=1;while(power!=maxpower){resb=data.val&data.position;data.position>>=1;if(data.position==0){data.position=resetValue;data.val=getNextValue(data.index++)}bits|=(resb>0?1:0)*power;power<<=1}c=f(bits);break;case 2:return""}dictionary[3]=c;w=c;result.push(c);while(true){if(data.index>length){return""}bits=0;maxpower=Math.pow(2,numBits);power=1;while(power!=maxpower){resb=data.val&data.position;data.position>>=1;if(data.position==0){data.position=resetValue;data.val=getNextValue(data.index++)}bits|=(resb>0?1:0)*power;power<<=1}switch(c=bits){case 0:bits=0;maxpower=Math.pow(2,8);power=1;while(power!=maxpower){resb=data.val&data.position;data.position>>=1;if(data.position==0){data.position=resetValue;data.val=getNextValue(data.index++)}bits|=(resb>0?1:0)*power;power<<=1}dictionary[dictSize++]=f(bits);c=dictSize-1;enlargeIn--;break;case 1:bits=0;maxpower=Math.pow(2,16);power=1;while(power!=maxpower){resb=data.val&data.position;data.position>>=1;if(data.position==0){data.position=resetValue;data.val=getNextValue(data.index++)}bits|=(resb>0?1:0)*power;power<<=1}dictionary[dictSize++]=f(bits);c=dictSize-1;enlargeIn--;break;case 2:return result.join('')}if(enlargeIn==0){enlargeIn=Math.pow(2,numBits);numBits++}if(dictionary[c]){entry=dictionary[c]}else{if(c===dictSize){entry=w+w.charAt(0)}else{return null}}result.push(entry);dictionary[dictSize++]=w+entry.charAt(0);enlargeIn--;w=entry;if(enlargeIn==0){enlargeIn=Math.pow(2,numBits);numBits++}}}};return LZString})();String.prototype.splic=function(f){return LZString.decompressFromBase64(this).split(f)};
-    """
-
-    // Page list is javascript eval encoded and LZString encoded, these website:
-    // http://www.oicqzone.com/tool/eval/ , https://www.w3xue.com/tools/jseval/ ,
-    // https://www.w3cschool.cn/tools/index?name=evalencode can try to decode javascript eval encoded content,
-    // jsDecodeFunc's LZString.decompressFromBase64() can decode LZString.
-
+    // Page list is inside [packed](http://dean.edwards.name/packer/) JavaScript with a special twist:
+    // the normal content array (`'a|b|c'.split('|')`) is replaced with LZString and base64-encoded
+    // version.
+    //
     // These "\" can't be remove: "\}", more info in pull request 3926.
     @Suppress("RegExpRedundantEscape")
-    private val re = Regex("""window\[".*?"\](\(.*\)\s*\{[\s\S]+\}\s*\(.*\))""")
+    private val packedRegex = Regex("""window\[".*?"\](\(.*\)\s*\{[\s\S]+\}\s*\(.*\))""")
 
     @Suppress("RegExpRedundantEscape")
-    private val re2 = Regex("""\{.*\}""")
+    private val blockCcArgRegex = Regex("""\{.*\}""")
+
+    private val packedContentRegex = Regex("""['"]([0-9A-Za-z+/=]+)['"]\[['"].*?['"]]\(['"].*?['"]\)""")
+
+    private val singleQuoteRegex = Regex("""\\'""")
 
     override fun pageListParse(document: Document): List<Page> {
         // R18 warning element (#erroraudit_show) is remove by web page javascript, so here the warning element
@@ -397,13 +414,19 @@ class Manhuagui(
         }
 
         val html = document.html()
-        val imgCode = re.find(html)?.groups?.get(1)?.value
-        val imgDecode = QuickJs.create().use {
-            it.evaluate(jsDecodeFunc + imgCode) as String
+        val imgCode = packedRegex.find(html)!!.groupValues[1].let {
+            // Make the packed content normal again so :lib:unpacker can do its job
+            it.replace(packedContentRegex) { match ->
+                val lzs = match.groupValues[1]
+                val decoded = LZString.decompressFromBase64(lzs)
+                "'$decoded'.split('|')"
+            }
         }
-
-        val imgJsonStr = re2.find(imgDecode)?.groups?.get(0)?.value
-        val imageJson: Comic = json.decodeFromString(imgJsonStr!!)
+        // Convert single quote to dash before passing to unpack, since unpack will replace it
+        // with double quote, which may make json parse fail.
+        val imgDecode = Unpacker.unpack(singleQuoteRegex.replace(imgCode, "-"))
+        val imgJsonStr = blockCcArgRegex.find(imgDecode)!!.groupValues[0]
+        val imageJson: Comic = json.decodeFromString(imgJsonStr)
 
         return imageJson.files!!.mapIndexed { i, imgStr ->
             val imgurl = "${imageServer[0]}${imageJson.path}$imgStr?e=${imageJson.sl?.e}&m=${imageJson.sl?.m}"
@@ -411,7 +434,7 @@ class Manhuagui(
         }
     }
 
-    override fun imageUrlParse(document: Document) = throw UnsupportedOperationException("Not used.")
+    override fun imageUrlParse(document: Document) = throw UnsupportedOperationException()
 
     override fun setupPreferenceScreen(screen: androidx.preference.PreferenceScreen) {
         val mainSiteRateLimitPreference = androidx.preference.ListPreference(screen.context).apply {
@@ -537,6 +560,10 @@ class Manhuagui(
             Pair("最新发布", ""), // Publish date
             Pair("最新更新", "update"),
             Pair("评分最高", "rate"),
+            Pair("日排行", RANK_PREFIX),
+            Pair("周排行", "${RANK_PREFIX}week"),
+            Pair("月排行", "${RANK_PREFIX}month"),
+            Pair("总排行", "${RANK_PREFIX}total"),
         ),
     )
 
@@ -614,6 +641,11 @@ class Manhuagui(
         "按年份",
         arrayOf(
             Pair("全部", ""),
+            Pair("2025年", "2025"),
+            Pair("2024年", "2024"),
+            Pair("2023年", "2023"),
+            Pair("2022年", "2022"),
+            Pair("2021年", "2021"),
             Pair("2020年", "2020"),
             Pair("2019年", "2019"),
             Pair("2018年", "2018"),
@@ -697,6 +729,8 @@ class Manhuagui(
         private const val IMAGE_CDN_RATELIMIT_PREF_TITLE = "图片CDN每秒连接数限制" // "Ratelimit permits per second for image CDN"
         private const val IMAGE_CDN_RATELIMIT_PREF_SUMMARY = "此值影响加载图片时发起连接请求的数量。调低此值可能减小IP被屏蔽的几率，但加载速度也会变慢。需要重启软件以生效。\n当前值：%s" // "This value affects network request amount for loading image. Lower this value may reduce the chance to get IP Ban, but loading speed will be slower too. Tachiyomi restart required."
         private const val IMAGE_CDN_RATELIMIT_DEFAULT_VALUE = "4"
+
+        private const val RANK_PREFIX = "rank_"
 
         private val ENTRIES_ARRAY = (1..10).map { i -> i.toString() }.toTypedArray()
         const val PREFIX_ID_SEARCH = "id:"

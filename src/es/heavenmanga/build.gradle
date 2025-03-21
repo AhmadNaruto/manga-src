@@ -1,11 +1,7 @@
-apply plugin: 'com.android.application'
-apply plugin: 'kotlin-android'
-
 ext {
     extName = 'HeavenManga'
-    pkgNameSuffix = 'es.heavenmanga'
     extClass = '.HeavenManga'
-    extVersionCode = 6
+    extVersionCode = 7
     isNsfw = true
 }
 

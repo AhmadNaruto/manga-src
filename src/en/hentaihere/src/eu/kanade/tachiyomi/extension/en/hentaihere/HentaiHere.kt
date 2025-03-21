@@ -114,7 +114,7 @@ class HentaiHere : ParsedHttpSource() {
     override fun searchMangaSelector() = ".item"
 
     override fun searchMangaFromElement(element: Element): SManga {
-        val a = element.select(".pos-rlt a")
+        val a = element.select("a")
         val img = element.select(".pos-rlt img")
         val mutedText = element.select("div:not(.pos-rtl) > .text-muted").text()
         val artistName = mutedText
@@ -206,10 +206,10 @@ class HentaiHere : ParsedHttpSource() {
         }
 
     override fun pageListParse(document: Document): List<Page> =
-        throw UnsupportedOperationException("Not used.")
+        throw UnsupportedOperationException()
 
     override fun imageUrlParse(document: Document) =
-        throw UnsupportedOperationException("Not used.")
+        throw UnsupportedOperationException()
 
     // Filters
     override fun getFilterList(): FilterList {

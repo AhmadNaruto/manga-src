@@ -1,6 +1,5 @@
 package eu.kanade.tachiyomi.extension.en.tapastic
 
-import android.app.Application
 import android.content.SharedPreferences
 import android.webkit.CookieManager
 import androidx.preference.PreferenceScreen
@@ -16,6 +15,7 @@ import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
 import eu.kanade.tachiyomi.source.online.ParsedHttpSource
 import eu.kanade.tachiyomi.util.asJsoup
+import keiyoushi.utils.getPreferencesLazy
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.boolean
 import kotlinx.serialization.json.int
@@ -25,15 +25,13 @@ import okhttp3.Cookie
 import okhttp3.CookieJar
 import okhttp3.Headers
 import okhttp3.HttpUrl
-import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
-import uy.kohesive.injekt.Injekt
-import uy.kohesive.injekt.api.get
 import uy.kohesive.injekt.injectLazy
 import java.text.SimpleDateFormat
 import java.util.Locale
@@ -99,9 +97,7 @@ class Tapastic : ConfigurableSource, ParsedHttpSource() {
         .addInterceptor(TextInterceptor())
         .build()
 
-    private val preferences: SharedPreferences by lazy {
-        Injekt.get<Application>().getSharedPreferences("source_$id", 0x0000)
-    }
+    private val preferences: SharedPreferences by getPreferencesLazy()
 
     override fun headersBuilder(): Headers.Builder = Headers.Builder()
         .add("Referer", "https://m.tapas.io")
@@ -213,14 +209,14 @@ class Tapastic : ConfigurableSource, ParsedHttpSource() {
         val url: HttpUrl.Builder
         // If there is any search text, use text search, ignoring filters
         if (query.isNotBlank()) {
-            url = "$baseUrl/search".toHttpUrlOrNull()!!.newBuilder()
+            url = "$baseUrl/search".toHttpUrl().newBuilder()
                 .addQueryParameter("q", query)
                 .addQueryParameter("t", "COMICS")
         } else {
             // Checking mature filter
             val matureFilter = filterList.find { it is MatureFilter } as MatureFilter
             if (matureFilter.state) {
-                url = "$baseUrl/mature".toHttpUrlOrNull()!!.newBuilder()
+                url = "$baseUrl/mature".toHttpUrl().newBuilder()
                 // Append only mature uri filters
                 filterList.forEach {
                     if (it is UriFilter && it.isMature) {
@@ -228,7 +224,7 @@ class Tapastic : ConfigurableSource, ParsedHttpSource() {
                     }
                 }
             } else {
-                url = "$baseUrl/comics".toHttpUrlOrNull()!!.newBuilder()
+                url = "$baseUrl/comics".toHttpUrl().newBuilder()
                 // Append only non-mature uri filters
                 filterList.forEach {
                     if (it is UriFilter && !it.isMature) {
@@ -244,7 +240,7 @@ class Tapastic : ConfigurableSource, ParsedHttpSource() {
         }
         // Append page number
         url.addQueryParameter("pageNumber", page.toString())
-        return GET(url.toString(), headers)
+        return GET(url.build(), headers)
     }
 
     override fun searchMangaNextPageSelector() =
@@ -363,7 +359,7 @@ class Tapastic : ConfigurableSource, ParsedHttpSource() {
                 pages = pages + Page(
                     pages.size,
                     "",
-                    TextInterceptorHelper.createUrl(creator, episodeStory),
+                    TextInterceptorHelper.createUrl("Author's Notes from $creator", episodeStory),
                 )
             }
         }
@@ -371,7 +367,7 @@ class Tapastic : ConfigurableSource, ParsedHttpSource() {
     }
 
     override fun imageUrlParse(document: Document) =
-        throw UnsupportedOperationException("This method should not be called!")
+        throw UnsupportedOperationException()
 
     // Filters
 

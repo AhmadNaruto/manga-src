@@ -6,6 +6,7 @@ import eu.kanade.tachiyomi.source.model.Page
 import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
 import eu.kanade.tachiyomi.source.online.HttpSource
+import eu.kanade.tachiyomi.util.asJsoup
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.Json
 import okhttp3.Headers
@@ -13,7 +14,6 @@ import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.Request
 import okhttp3.Response
-import org.jsoup.Jsoup
 import rx.Observable
 import uy.kohesive.injekt.injectLazy
 
@@ -86,7 +86,7 @@ class Pixiv(override val lang: String) : HttpSource() {
 
     override fun fetchSearchManga(page: Int, query: String, filters: FilterList): Observable<MangasPage> {
         val filters = filters.list as PixivFilters
-        val hash = Pair(query, filters).hashCode()
+        val hash = Pair(query, filters.toList()).hashCode()
 
         if (hash != searchHash || page == 1) {
             searchHash = hash
@@ -191,7 +191,7 @@ class Pixiv(override val lang: String) : HttpSource() {
         for (p in countUp(start = 1)) {
             searchUsers.url.setEncodedQueryParameter("p", p.toString())
 
-            val userIds = Jsoup.parse(searchUsers.execute().body.string())
+            val userIds = searchUsers.execute().asJsoup()
                 .select(".user-recommendation-item > a").eachAttr("href")
                 .map { it.substringAfterLast('/') }
 
@@ -370,32 +370,32 @@ class Pixiv(override val lang: String) : HttpSource() {
     }
 
     override fun chapterListParse(response: Response): List<SChapter> =
-        throw UnsupportedOperationException("Not used.")
+        throw UnsupportedOperationException()
 
     override fun imageUrlParse(response: Response): String =
-        throw UnsupportedOperationException("Not used.")
+        throw UnsupportedOperationException()
 
     override fun latestUpdatesParse(response: Response): MangasPage =
-        throw UnsupportedOperationException("Not used.")
+        throw UnsupportedOperationException()
 
     override fun latestUpdatesRequest(page: Int): Request =
-        throw UnsupportedOperationException("Not used.")
+        throw UnsupportedOperationException()
 
     override fun mangaDetailsParse(response: Response): SManga =
-        throw UnsupportedOperationException("Not used.")
+        throw UnsupportedOperationException()
 
     override fun pageListParse(response: Response): List<Page> =
-        throw UnsupportedOperationException("Not used.")
+        throw UnsupportedOperationException()
 
     override fun popularMangaParse(response: Response): MangasPage =
-        throw UnsupportedOperationException("Not used.")
+        throw UnsupportedOperationException()
 
     override fun popularMangaRequest(page: Int): Request =
-        throw UnsupportedOperationException("Not used.")
+        throw UnsupportedOperationException()
 
     override fun searchMangaParse(response: Response): MangasPage =
-        throw UnsupportedOperationException("Not used.")
+        throw UnsupportedOperationException()
 
     override fun searchMangaRequest(page: Int, query: String, filters: FilterList): Request =
-        throw UnsupportedOperationException("Not used.")
+        throw UnsupportedOperationException()
 }

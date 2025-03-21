@@ -1,8 +1,8 @@
 package eu.kanade.tachiyomi.extension.ru.desu
 
-import android.app.Application
 import android.content.SharedPreferences
 import android.widget.Toast
+import androidx.preference.EditTextPreference
 import androidx.preference.ListPreference
 import eu.kanade.tachiyomi.network.GET
 import eu.kanade.tachiyomi.network.asObservableSuccess
@@ -15,8 +15,9 @@ import eu.kanade.tachiyomi.source.model.Page
 import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
 import eu.kanade.tachiyomi.source.online.HttpSource
+import keiyoushi.utils.getPreferences
+import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.float
 import kotlinx.serialization.json.floatOrNull
@@ -31,8 +32,6 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
 import rx.Observable
-import uy.kohesive.injekt.Injekt
-import uy.kohesive.injekt.api.get
 import uy.kohesive.injekt.injectLazy
 
 class Desu : ConfigurableSource, HttpSource() {
@@ -40,17 +39,27 @@ class Desu : ConfigurableSource, HttpSource() {
 
     override val id: Long = 6684416167758830305
 
-    override val baseUrl = "https://desu.win"
+    private val preferences: SharedPreferences = getPreferences()
+
+    init {
+        preferences.getString(DEFAULT_DOMAIN_PREF, null).let { prefDefaultDomain ->
+            if (prefDefaultDomain != DOMAIN_DEFAULT) {
+                preferences.edit()
+                    .putString(DOMAIN_TITLE, DOMAIN_DEFAULT)
+                    .putString(DEFAULT_DOMAIN_PREF, DOMAIN_DEFAULT)
+                    .apply()
+            }
+        }
+    }
+
+    private var domain: String = preferences.getString(DOMAIN_TITLE, DOMAIN_DEFAULT)!!
+    override val baseUrl: String = domain
 
     override val lang = "ru"
 
     override val supportsLatest = true
 
     private val json: Json by injectLazy()
-
-    private val preferences: SharedPreferences by lazy {
-        Injekt.get<Application>().getSharedPreferences("source_$id", 0x0000)
-    }
 
     override fun headersBuilder() = Headers.Builder().apply {
         add("User-Agent", "Tachiyomi")
@@ -62,33 +71,8 @@ class Desu : ConfigurableSource, HttpSource() {
             .rateLimitHost(baseUrl.toHttpUrl(), 3)
             .build()
 
-    private fun mangaPageFromJSON(jsonStr: String, next: Boolean): MangasPage {
-        val mangaList = json.parseToJsonElement(jsonStr).jsonArray
-            .map {
-                SManga.create().apply {
-                    mangaFromJSON(it.jsonObject, false)
-                }
-            }
-
-        return MangasPage(mangaList, next)
-    }
-
-    private fun SManga.mangaFromJSON(obj: JsonObject, chapter: Boolean) {
-        val id = obj["id"]!!.jsonPrimitive.int
-
-        url = "/$id"
-        title = if (isEng.equals("rus")) {
-            obj["russian"]!!.jsonPrimitive.content
-                .split(" / ")
-                .first()
-        } else {
-            obj["name"]!!.jsonPrimitive.content
-                .split(" / ")
-                .first()
-        }
-        thumbnail_url = obj["image"]!!.jsonObject["original"]!!.jsonPrimitive.content
-
-        val ratingValue = obj["score"]!!.jsonPrimitive.floatOrNull ?: 0F
+    private fun MangaDetDto.toSManga(genresStr: String? = "", authorsStr: String? = null): SManga {
+        val ratingValue = score!!
         val ratingStar = when {
             ratingValue > 9.5 -> "★★★★★"
             ratingValue > 8.5 -> "★★★★✬"
@@ -103,12 +87,12 @@ class Desu : ConfigurableSource, HttpSource() {
             else -> "☆☆☆☆☆"
         }
 
-        val rawAgeStop = when (obj["adult"]!!.jsonPrimitive.int) {
-            1 -> "18+"
-            else -> ""
+        val rawAgeStop = when (age_limit!!) {
+            "no" -> ""
+            else -> age_limit.replace("_plus", "+")
         }
 
-        val category = when (obj["kind"]!!.jsonPrimitive.content) {
+        val category = when (kind!!) {
             "manga" -> "Манга"
             "manhwa" -> "Манхва"
             "manhua" -> "Маньхуа"
@@ -119,46 +103,38 @@ class Desu : ConfigurableSource, HttpSource() {
 
         var altName = ""
 
-        if (obj["synonyms"]?.jsonPrimitive?.content.orEmpty().isNotEmpty() && obj["synonyms"]!!.jsonPrimitive.contentOrNull != null) {
+        if (!synonyms.isNullOrEmpty()) {
             altName = "Альтернативные названия:\n" +
-                obj["synonyms"]!!.jsonPrimitive.content
-                    .replace("/", " / ") +
+                synonyms.replace("/", " / ") +
                 "\n\n"
         }
 
-        description = if (isEng.equals("rus")) {
-            obj["name"]!!.jsonPrimitive.content
-                .split(" / ")
-                .first()
-        } else {
-            obj["russian"]!!.jsonPrimitive.content
-                .split(" / ")
-                .first()
-        } + "\n" +
-            ratingStar + " " + ratingValue +
-            " (голосов: " +
-            obj["score_users"]!!.jsonPrimitive.int +
-            ")\n" + altName +
-            obj["description"]!!.jsonPrimitive.content
-
-        genre = if (chapter) {
-            "$category, $rawAgeStop, " +
-                obj["genres"]!!.jsonArray
-                    .map { it.jsonObject["russian"]!!.jsonPrimitive.content }
-                    .joinToString()
-        } else {
-            category + ", " + rawAgeStop + ", " + obj["genres"]!!.jsonPrimitive.content
-        }
-
-        status = when (obj["trans_status"]!!.jsonPrimitive.content) {
-            "continued" -> SManga.ONGOING
-            "completed" -> SManga.COMPLETED
-            else -> when (obj["status"]!!.jsonPrimitive.content) {
-                "ongoing" -> SManga.ONGOING
-                "released" -> SManga.COMPLETED
-                //  "copyright" -> SManga.LICENSED  Hides available chapters!
-                else -> SManga.UNKNOWN
+        return SManga.create().apply {
+            title = if (isEng.equals("rus")) {
+                russian
+            } else {
+                name
             }
+            url = "/$id"
+            thumbnail_url = image.original
+            description = if (isEng.equals("rus")) {
+                name
+            } else {
+                russian
+            } + "\n" + ratingStar + " " + ratingValue + " (голосов: " +
+                score_users + ")\n" + altName + this@toSManga.description
+            genre = ("$category, $rawAgeStop, $genresStr").split(", ").filter { it.isNotEmpty() }.joinToString { it.trim() }
+            status = when (trans_status) {
+                "continued" -> SManga.ONGOING
+                "completed" -> SManga.COMPLETED
+                else -> when (this@toSManga.status) {
+                    "ongoing" -> SManga.ONGOING
+                    "released" -> SManga.COMPLETED
+                    //  "copyright" -> SManga.LICENSED  Hides available chapters!
+                    else -> SManga.UNKNOWN
+                }
+            }
+            author = authorsStr
         }
     }
 
@@ -198,14 +174,12 @@ class Desu : ConfigurableSource, HttpSource() {
     }
 
     override fun searchMangaParse(response: Response): MangasPage {
-        val res = json.parseToJsonElement(response.body.string()).jsonObject
-        val obj = res["response"]!!.jsonArray
-        val nav = res["pageNavParams"]!!.jsonObject
-        val count = nav["count"]!!.jsonPrimitive.int
-        val limit = nav["limit"]!!.jsonPrimitive.int
-        val page = nav["page"]!!.jsonPrimitive.int
+        val page = json.decodeFromString<PageWrapperDto<MangaDetDto>>(response.body.string())
+        val mangas = page.response.map {
+            it.toSManga()
+        }
 
-        return mangaPageFromJSON(obj.toString(), count > page * limit)
+        return MangasPage(mangas, page.pageNavParams.count > page.pageNavParams.page * page.pageNavParams.limit)
     }
 
     private fun titleDetailsRequest(manga: SManga): Request {
@@ -224,12 +198,17 @@ class Desu : ConfigurableSource, HttpSource() {
     override fun mangaDetailsRequest(manga: SManga): Request {
         return GET(baseUrl + "/manga" + manga.url, headers)
     }
-    override fun mangaDetailsParse(response: Response) = SManga.create().apply {
-        val obj = json.parseToJsonElement(response.body.string())
-            .jsonObject["response"]!!
-            .jsonObject
 
-        mangaFromJSON(obj, true)
+    override fun mangaDetailsParse(response: Response) = SManga.create().apply {
+        val responseString = response.body.string()
+        val series = json.decodeFromString<SeriesWrapperDto<MangaDetDto>>(responseString)
+        val genresStr = json.decodeFromString<SeriesWrapperDto<MangaDetGenresDto>>(responseString).response.genres!!.joinToString { it.russian }
+        val authorsStr = if (responseString.contains("people_name")) {
+            json.decodeFromString<SeriesWrapperDto<MangaDetAuthorsDto>>(responseString).response.authors!!.joinToString { it.people_name }
+        } else {
+            null
+        }
+        return series.response.toSManga(genresStr, authorsStr)
     }
 
     override fun chapterListParse(response: Response): List<SChapter> {
@@ -278,7 +257,7 @@ class Desu : ConfigurableSource, HttpSource() {
     }
 
     override fun imageUrlParse(response: Response) =
-        throw UnsupportedOperationException("This method should not be called!")
+        throw UnsupportedOperationException()
 
     private fun searchMangaByIdRequest(id: String): Request {
         return GET("$baseUrl$API_URL/$id", headers)
@@ -379,6 +358,7 @@ class Desu : ConfigurableSource, HttpSource() {
     )
 
     private var isEng: String? = preferences.getString(LANGUAGE_PREF, "eng")
+
     override fun setupPreferenceScreen(screen: androidx.preference.PreferenceScreen) {
         val titleLanguagePref = ListPreference(screen.context).apply {
             key = LANGUAGE_PREF
@@ -393,13 +373,31 @@ class Desu : ConfigurableSource, HttpSource() {
                 true
             }
         }
+        val domainDesuPref = EditTextPreference(screen.context).apply {
+            key = DOMAIN_TITLE
+            title = DOMAIN_TITLE
+            summary = domain
+            setDefaultValue(DOMAIN_DEFAULT)
+            dialogTitle = DOMAIN_TITLE
+            setOnPreferenceChangeListener { _, _ ->
+                val warning = "Для смены домена необходимо перезапустить приложение с полной остановкой."
+                Toast.makeText(screen.context, warning, Toast.LENGTH_LONG).show()
+                true
+            }
+        }
         screen.addPreference(titleLanguagePref)
+        screen.addPreference(domainDesuPref)
     }
+
     companion object {
         const val PREFIX_SLUG_SEARCH = "slug:"
 
         private const val LANGUAGE_PREF = "DesuTitleLanguage"
 
         private const val API_URL = "/manga/api"
+
+        private const val DOMAIN_TITLE = "Домен"
+        private const val DEFAULT_DOMAIN_PREF = "default_domain"
+        private const val DOMAIN_DEFAULT = "https://desu.store"
     }
 }

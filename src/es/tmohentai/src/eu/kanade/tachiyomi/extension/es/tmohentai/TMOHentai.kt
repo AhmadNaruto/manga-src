@@ -1,6 +1,5 @@
 package eu.kanade.tachiyomi.extension.es.tmohentai
 
-import android.app.Application
 import android.content.SharedPreferences
 import eu.kanade.tachiyomi.network.GET
 import eu.kanade.tachiyomi.network.asObservableSuccess
@@ -14,16 +13,14 @@ import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
 import eu.kanade.tachiyomi.source.model.UpdateStrategy
 import eu.kanade.tachiyomi.source.online.ParsedHttpSource
+import keiyoushi.utils.getPreferencesLazy
 import okhttp3.Headers
 import okhttp3.HttpUrl.Companion.toHttpUrl
-import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
 import rx.Observable
-import uy.kohesive.injekt.Injekt
-import uy.kohesive.injekt.api.get
 
 class TMOHentai : ConfigurableSource, ParsedHttpSource() {
 
@@ -35,16 +32,14 @@ class TMOHentai : ConfigurableSource, ParsedHttpSource() {
 
     override val supportsLatest = true
 
-    override val client: OkHttpClient = super.client.newBuilder()
+    override val client: OkHttpClient = network.cloudflareClient.newBuilder()
         .rateLimitHost(baseUrl.toHttpUrl(), 1, 2)
         .build()
 
     override fun headersBuilder(): Headers.Builder = super.headersBuilder()
         .set("Referer", "$baseUrl/")
 
-    private val preferences: SharedPreferences by lazy {
-        Injekt.get<Application>().getSharedPreferences("source_$id", 0x0000)
-    }
+    private val preferences: SharedPreferences by getPreferencesLazy()
 
     override fun popularMangaRequest(page: Int) = GET("$baseUrl/section/all?view=list&page=$page&order=popularity&order-dir=desc&search[searchText]=&search[searchBy]=name&type=all", headers)
 
@@ -134,7 +129,7 @@ class TMOHentai : ConfigurableSource, ParsedHttpSource() {
     override fun imageUrlParse(document: Document): String = document.select("div#content-images img.content-image").attr("abs:data-original")
 
     override fun searchMangaRequest(page: Int, query: String, filters: FilterList): Request {
-        val url = "$baseUrl/section/all?view=list".toHttpUrlOrNull()!!.newBuilder()
+        val url = "$baseUrl/section/all?view=list".toHttpUrl().newBuilder()
 
         url.addQueryParameter("search[searchText]", query)
         url.addQueryParameter("page", page.toString())
@@ -165,7 +160,7 @@ class TMOHentai : ConfigurableSource, ParsedHttpSource() {
             }
         }
 
-        return GET(url.build().toString(), headers)
+        return GET(url.build(), headers)
     }
 
     override fun searchMangaSelector() = popularMangaSelector()

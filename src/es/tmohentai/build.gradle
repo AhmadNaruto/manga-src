@@ -1,11 +1,7 @@
-apply plugin: 'com.android.application'
-apply plugin: 'kotlin-android'
-
 ext {
     extName = 'TMOHentai'
-    pkgNameSuffix = 'es.tmohentai'
     extClass = '.TMOHentai'
-    extVersionCode = 8
+    extVersionCode = 10
     isNsfw = true
 }
 

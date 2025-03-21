@@ -1,12 +1,10 @@
-apply plugin: 'com.android.application'
-apply plugin: 'kotlin-android'
-apply plugin: 'kotlinx-serialization'
-
 ext {
     extName = 'Manga Sect'
-    pkgNameSuffix = 'en.mangasect'
     extClass = '.MangaSect'
-    extVersionCode = 1
+    themePkg = 'liliana'
+    baseUrl = 'https://mangasect.net'
+    overrideVersionCode = 0
+    isNsfw = false
 }
 
 apply from: "$rootDir/common.gradle"
